@@ -1,0 +1,11 @@
+[package]
+name = "penumbra-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+log.workspace = true
+env_logger.workspace = true

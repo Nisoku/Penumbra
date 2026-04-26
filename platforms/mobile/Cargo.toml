@@ -1,0 +1,19 @@
+[package]
+name = "penumbra-mobile"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+penumbra-core = { path = "../../crates/core" }
+penumbra-notes = { path = "../../crates/notes" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+dioxus = { version = "0.7", features = ["mobile"] }
+
+[profile.release]
+opt-level = 3
