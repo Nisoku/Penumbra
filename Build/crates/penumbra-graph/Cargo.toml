@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
+petgraph = "0.8.3"
+serde.workspace = true

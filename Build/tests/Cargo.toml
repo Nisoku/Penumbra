@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../crates/penumbra-core" }
+penumbra-graph = { path = "../crates/penumbra-graph" }
+penumbra-layout = { path = "../crates/penumbra-layout" }

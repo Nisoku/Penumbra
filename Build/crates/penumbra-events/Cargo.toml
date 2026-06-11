@@ -6,3 +6,5 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
+async-channel = "2"
+futures.workspace = true
