@@ -1880,6 +1880,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "penumbra-auto-link"
+version = "0.1.0"
+dependencies = [
+ "penumbra-core",
+ "penumbra-events",
+ "penumbra-graph",
+ "penumbra-index",
+ "tracing",
+]
+
+[[package]]
 name = "penumbra-core"
 version = "0.1.0"
 dependencies = [
@@ -1991,6 +2002,7 @@ dependencies = [
  "async-channel",
  "chrono",
  "futures",
+ "penumbra-auto-link",
  "penumbra-core",
  "penumbra-embed",
  "penumbra-events",

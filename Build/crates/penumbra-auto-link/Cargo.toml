@@ -1,0 +1,12 @@
+[package]
+name = "penumbra-auto-link"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+penumbra-core = { path = "../penumbra-core" }
+penumbra-index = { path = "../penumbra-index" }
+penumbra-graph = { path = "../penumbra-graph" }
+penumbra-events = { path = "../penumbra-events" }
+tracing = { workspace = true }

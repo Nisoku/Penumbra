@@ -7,7 +7,7 @@ use crate::parser::parse_block;
 pub struct MarkdownStream {
     stream: MdStream,
     state: DocumentState,
-    /// mdstream block id → vector of AST blocks
+    /// mdstream block id -> vector of AST blocks
     committed: Vec<(mdstream::BlockId, Vec<Block>)>,
 }
 

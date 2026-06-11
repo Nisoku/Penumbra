@@ -85,7 +85,7 @@ pub struct LayoutEngine {
 impl LayoutEngine {
     /// Create a new layout engine, initialising the GPU backend immediately.
     ///
-    /// Returns `LayoutEngine` even if GPU creation fails — `step()` gracefully
+    /// Returns `LayoutEngine` even if GPU creation fails so `step()` gracefully
     /// returns zero displacement when no GPU is available.
     pub async fn new(config: LayoutConfig) -> Self {
         let gpu = GpuLayout::new(GpuConfig::from(&config)).await.ok();
@@ -235,7 +235,7 @@ impl LayoutEngine {
 
         let old_positions: Vec<VibePos> = self.positions.clone();
 
-        // GPU step (skipped when no backend or empty edges — wgpu rejects
+        // GPU step (skipped when no backend or empty edges as wgpu rejects
         // zero-sized storage buffers).
         if let Some(ref mut gpu) = self.inner {
             if !self.edges.is_empty() {

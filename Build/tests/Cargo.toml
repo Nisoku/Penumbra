@@ -14,6 +14,7 @@ penumbra-index = { path = "../crates/penumbra-index" }
 penumbra-search = { path = "../crates/penumbra-search" }
 penumbra-storage = { path = "../crates/penumbra-storage" }
 penumbra-markdown = { path = "../crates/penumbra-markdown" }
+penumbra-auto-link = { path = "../crates/penumbra-auto-link" }
 serde_json.workspace = true
 uuid.workspace = true
 futures.workspace = true
