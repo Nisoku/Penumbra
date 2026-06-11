@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use penumbra_core::link::Link;
 use penumbra_core::note::NoteId;
-use penumbra_core::position::Position;
+use penumbra_core::position::{Bounds, Position};
 use vibe_graph_layout_gpu::{
     Edge as VibeEdge, GpuLayout, LayoutConfig as GpuConfig, Position as VibePos,
 };
@@ -19,6 +19,12 @@ pub struct LayoutConfig {
     pub ideal_length: f32,
     pub max_iterations: usize,
     pub convergence_threshold: f64,
+    /// Minimum gap between node bounding boxes after collision avoidance.
+    pub collision_margin: f64,
+    /// Maximum displacement per collision resolution pass (pixels).
+    pub max_collision_push: f64,
+    /// Number of iterative passes for collision resolution.
+    pub collision_passes: usize,
 }
 
 impl Default for LayoutConfig {
@@ -33,6 +39,9 @@ impl Default for LayoutConfig {
             ideal_length: 50.0,
             max_iterations: 200,
             convergence_threshold: 0.1,
+            collision_margin: 10.0,
+            max_collision_push: 20.0,
+            collision_passes: 5,
         }
     }
 }
@@ -66,6 +75,7 @@ pub struct LayoutEngine {
     positions: Vec<VibePos>,
     edges: Vec<VibeEdge>,
     pinned: HashMap<NoteId, VibePos>,
+    node_bounds: HashMap<NoteId, Bounds>,
     config: LayoutConfig,
     iteration: usize,
     dirty: bool,
@@ -81,6 +91,7 @@ impl LayoutEngine {
             positions: Vec::new(),
             edges: Vec::new(),
             pinned: HashMap::new(),
+            node_bounds: HashMap::new(),
             config,
             iteration: 0,
             dirty: false,
@@ -117,6 +128,7 @@ impl LayoutEngine {
         self.positions.remove(idx as usize);
         self.index_map.remove(id);
         self.pinned.remove(id);
+        self.node_bounds.remove(id);
 
         // Rebuild index map since indices shifted
         self.index_map.clear();
@@ -157,6 +169,21 @@ impl LayoutEngine {
                 .insert(*id, VibePos::new(pos.x as f32, pos.y as f32));
         }
         self.dirty = true;
+    }
+
+    /// Set the bounding box for a single node (used for collision avoidance).
+    pub fn set_node_bounds(&mut self, id: NoteId, bounds: Bounds) {
+        self.node_bounds.insert(id, bounds);
+    }
+
+    /// Batch-set bounding boxes for all nodes.
+    pub fn set_bounds(&mut self, bounds: HashMap<NoteId, Bounds>) {
+        self.node_bounds = bounds;
+    }
+
+    /// Get the bounding box for a node, if one was set.
+    pub fn get_bounds(&self, id: &NoteId) -> Option<Bounds> {
+        self.node_bounds.get(id).copied()
     }
 
     pub fn pin(&mut self, id: &NoteId, pinned: bool) {
@@ -203,71 +230,74 @@ impl LayoutEngine {
             return 0.0;
         }
 
+        let old_positions: Vec<VibePos> = self.positions.clone();
+
         // No edges means no forces so skip GPU (zero-sized storage buffers
-        // are rejected by wgpu validation) and treat as a no-op step.
-        if self.edges.is_empty() {
-            self.iteration += 1;
-            return 0.0;
-        }
-
-        // Lazy GPU initialization on first step
-        if !self.initialized {
-            let gpu_config = GpuConfig::from(&self.config);
-            let mut gpu = match pollster::block_on(GpuLayout::new(gpu_config)) {
-                Ok(g) => g,
-                Err(e) => {
-                    tracing::error!("Failed to initialize GPU layout: {e}");
-                    self.iteration += 1;
-                    return 0.0;
-                }
-            };
-            if let Err(e) = gpu.init(self.positions.clone(), self.edges.clone()) {
-                tracing::error!("Failed to init GPU layout: {e}");
-                self.iteration += 1;
-                return 0.0;
-            }
-            gpu.start();
-            self.inner = Some(gpu);
-            self.initialized = true;
-            self.dirty = false;
-        }
-
-        // Re-init if the graph changed
-        if self.dirty {
-            if let Some(ref mut gpu) = self.inner {
-                if gpu
-                    .init(self.positions.clone(), self.edges.clone())
-                    .is_err()
-                {
+        // are rejected by wgpu validation)
+        if !self.edges.is_empty() {
+            // Lazy GPU initialization
+            if !self.initialized {
+                let gpu_config = GpuConfig::from(&self.config);
+                let mut gpu = match pollster::block_on(GpuLayout::new(gpu_config)) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        tracing::error!("Failed to initialize GPU layout: {e}");
+                        self.iteration += 1;
+                        return 0.0;
+                    }
+                };
+                if let Err(e) = gpu.init(self.positions.clone(), self.edges.clone()) {
+                    tracing::error!("Failed to init GPU layout: {e}");
                     self.iteration += 1;
                     return 0.0;
                 }
                 gpu.start();
+                self.inner = Some(gpu);
+                self.initialized = true;
+                self.dirty = false;
             }
-            self.dirty = false;
+
+            // Re-init if the graph changed
+            if self.dirty {
+                if let Some(ref mut gpu) = self.inner {
+                    if gpu
+                        .init(self.positions.clone(), self.edges.clone())
+                        .is_err()
+                    {
+                        self.iteration += 1;
+                        return 0.0;
+                    }
+                    gpu.start();
+                }
+                self.dirty = false;
+            }
+
+            let result = self.inner.as_mut().map(|gpu| gpu.step());
+            match result {
+                Some(Ok(new_positions)) => {
+                    self.positions.copy_from_slice(new_positions);
+                }
+                _ => {
+                    self.iteration += 1;
+                    return 0.0;
+                }
+            }
         }
 
-        let old_positions: Vec<VibePos> = self.positions.clone();
-
-        let result = self.inner.as_mut().map(|gpu| gpu.step());
-        match result {
-            Some(Ok(new_positions)) => {
-                self.positions.copy_from_slice(new_positions);
-            }
-            _ => {
-                self.iteration += 1;
-                return 0.0;
-            }
-        }
-
-        // Restore pinned node positions
+        // Restore pinned node positions (undoes any GPU movement).
         for (id, pin_pos) in &self.pinned {
             if let Some(&idx) = self.index_map.get(id) {
                 self.positions[idx as usize] = *pin_pos;
             }
         }
 
-        // Calculate average displacement for non-pinned nodes
+        // Resolve collisions among nodes with explicit bounds.
+        // Runs even without edges (nodes can overlap at initial positions).
+        if !self.node_bounds.is_empty() {
+            self.resolve_collisions();
+        }
+
+        // Calculate average displacement for non-pinned nodes.
         let mut total_disp = 0.0f64;
         let mut count = 0u32;
         for (i, nid) in self.nodes.iter().enumerate() {
@@ -311,6 +341,107 @@ impl LayoutEngine {
     /// is functionally equivalent to `step()`.
     pub fn step_neighborhood(&mut self, _id: &NoteId) -> f64 {
         self.step()
+    }
+
+    /// Push apart overlapping node bounding boxes.
+    ///
+    /// Runs several iterative passes. In each pass, every pair of overlapping
+    /// nodes is pushed apart along the center-to-center vector, clamped to
+    /// `max_collision_push` per pass. The margin controls how much extra
+    /// separation to maintain beyond bare overlap.
+    fn resolve_collisions(&mut self) {
+        let margin = self.config.collision_margin;
+        let max_push = self.config.max_collision_push;
+        let passes = self.config.collision_passes;
+
+        // Work in f64 to avoid precision issues with many small pushes.
+        let mut pos_f64: Vec<Position> = self
+            .positions
+            .iter()
+            .map(|p| Position::new(p.x as f64, p.y as f64))
+            .collect();
+
+        for _pass in 0..passes {
+            let mut any_resolved = false;
+
+            for i in 0..self.nodes.len() {
+                // Pinned nodes never move from collision push.
+                if self.pinned.contains_key(&self.nodes[i]) {
+                    continue;
+                }
+                let Some(bounds_i) = self.node_bounds.get(&self.nodes[i]) else {
+                    continue;
+                };
+
+                for j in (i + 1)..self.nodes.len() {
+                    if self.pinned.contains_key(&self.nodes[j]) {
+                        continue;
+                    }
+                    let Some(bounds_j) = self.node_bounds.get(&self.nodes[j]) else {
+                        continue;
+                    };
+
+                    let a = pos_f64[i];
+                    let b = pos_f64[j];
+
+                    if !bounds_i.overlaps(&a, bounds_j, &b) {
+                        continue;
+                    }
+
+                    // Compute separation direction (center to center).
+                    let ca_x = a.x + bounds_i.width * 0.5;
+                    let ca_y = a.y + bounds_i.height * 0.5;
+                    let cb_x = b.x + bounds_j.width * 0.5;
+                    let cb_y = b.y + bounds_j.height * 0.5;
+
+                    let dx = cb_x - ca_x;
+                    let dy = cb_y - ca_y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    let (nx, ny) = if dist < 1e-6 {
+                        // Coincident centers: fall back to a deterministic
+                        // direction derived from the node indices.
+                        let angle = (i * 2654435761 + j * 2246822519) as f64;
+                        (angle.cos(), angle.sin())
+                    } else {
+                        (dx / dist, dy / dist)
+                    };
+
+                    // Target separation distance: half-diagonal sum + margin.
+                    let half_diag_i = (bounds_i.width * bounds_i.width
+                        + bounds_i.height * bounds_i.height)
+                        .sqrt()
+                        * 0.5;
+                    let half_diag_j = (bounds_j.width * bounds_j.width
+                        + bounds_j.height * bounds_j.height)
+                        .sqrt()
+                        * 0.5;
+                    let target = half_diag_i + half_diag_j + margin;
+
+                    if dist >= target {
+                        continue;
+                    }
+
+                    let push = ((target - dist) * 0.5).min(max_push);
+
+                    pos_f64[i].x -= nx * push;
+                    pos_f64[i].y -= ny * push;
+                    pos_f64[j].x += nx * push;
+                    pos_f64[j].y += ny * push;
+
+                    any_resolved = true;
+                }
+            }
+
+            if !any_resolved {
+                break;
+            }
+        }
+
+        // Write back to the GPU positions.
+        for (i, p) in pos_f64.iter().enumerate() {
+            self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
+        }
     }
 
     fn random_position() -> VibePos {
