@@ -32,6 +32,26 @@ export async function handlePush(request, bucket) {
   const { notes, embeddings, positions, snapshotId } = body;
   let accepted = 0;
 
+  // Conflict detection: if client provides a snapshotId, it must match
+  // the current server snapshot.  If they differ, another client has
+  // pushed since this client's last pull.
+  if (snapshotId) {
+    const manifest = await getManifest(bucket);
+    if (manifest.snapshotId && manifest.snapshotId !== snapshotId) {
+      return new Response(
+        JSON.stringify({
+          error: 'conflict',
+          currentSnapshotId: manifest.snapshotId,
+          message: 'snapshotId mismatch, pull latest before pushing',
+        }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    }
+  }
+
   // Store notes
   if (notes) {
     for (const [id, data] of Object.entries(notes)) {
@@ -55,10 +75,10 @@ export async function handlePush(request, bucket) {
     }
   }
 
-  // Update manifest
+  // Update manifest with a *new* snapshot id
   const manifest = await getManifest(bucket);
   const now = new Date().toISOString();
-  const newSnapshotId = snapshotId || crypto.randomUUID();
+  const newSnapshotId = crypto.randomUUID();
 
   manifest.noteCount += accepted;
   manifest.lastModified = now;

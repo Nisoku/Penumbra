@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// The client stores the latest snapshot id locally to know what
 /// changes it has already applied.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncSnapshot {
     pub snapshot_id: String,
     pub timestamp: DateTime<Utc>,

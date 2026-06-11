@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -17,7 +18,7 @@ use crate::snapshot::SyncSnapshot;
 pub struct WorkerSyncProvider {
     base_url: String,
     client: reqwest::Client,
-    last_sync: Option<DateTime<Utc>>,
+    last_sync: Mutex<Option<DateTime<Utc>>>,
 }
 
 impl WorkerSyncProvider {
@@ -28,7 +29,7 @@ impl WorkerSyncProvider {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
-            last_sync: None,
+            last_sync: Mutex::new(None),
         }
     }
 
@@ -132,6 +133,8 @@ impl SyncProvider for WorkerSyncProvider {
             note_ids: notes.iter().map(|n| n.id.to_string()).collect(),
         };
 
+        *self.last_sync.lock().unwrap() = Some(Utc::now());
+
         Ok(snapshot)
     }
 
@@ -201,6 +204,8 @@ impl SyncProvider for WorkerSyncProvider {
             None
         };
 
+        *self.last_sync.lock().unwrap() = Some(Utc::now());
+
         Ok(SyncPullResult {
             notes,
             embeddings,
@@ -237,7 +242,7 @@ impl SyncProvider for WorkerSyncProvider {
     }
 
     fn last_sync(&self) -> Option<DateTime<Utc>> {
-        self.last_sync
+        *self.last_sync.lock().unwrap()
     }
 }
 

@@ -1,6 +1,5 @@
 # Penumbra
 
-- [ ] Cloud sync
 - [ ] Dioxus UI
 
 ## Dioxus
