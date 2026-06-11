@@ -7,7 +7,7 @@ use penumbra_core::Note;
 use penumbra_embed::SimpleEmbedder;
 use penumbra_events::EventBus;
 use penumbra_graph::GraphStore;
-use penumbra_index::USearchIndex;
+use penumbra_index::RuvectorIndex;
 use penumbra_index::VectorIndex;
 
 /// Body text that produces high-similarity trigram embeddings when shared
@@ -23,7 +23,7 @@ fn make_note(title: &str, body: &str) -> Note {
 
 fn setup() -> (AutoLinker, Note, Note) {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -61,7 +61,7 @@ fn process_note_creates_implicit_link() {
 #[test]
 fn process_note_skips_self() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -89,7 +89,7 @@ fn process_note_skips_self() {
 #[test]
 fn process_note_obeys_score_threshold() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -114,7 +114,7 @@ fn process_note_obeys_score_threshold() {
 #[test]
 fn process_note_respects_max_links() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -143,7 +143,7 @@ fn process_note_respects_max_links() {
 #[test]
 fn process_note_no_candidates_returns_empty() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -172,7 +172,7 @@ fn process_note_does_not_create_duplicates() {
 #[test]
 fn process_note_empty_body_does_not_panic() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 
@@ -193,7 +193,7 @@ fn process_note_empty_body_does_not_panic() {
 #[test]
 fn process_note_top_k_zero_returns_empty() {
     let embedder = Arc::new(SimpleEmbedder::new_384());
-    let index = Arc::new(Mutex::new(USearchIndex::new(384).unwrap()));
+    let index = Arc::new(Mutex::new(RuvectorIndex::new(384).unwrap()));
     let graph = Arc::new(Mutex::new(GraphStore::new()));
     let bus = Arc::new(EventBus::new());
 

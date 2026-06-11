@@ -3,12 +3,12 @@ use std::sync::{Arc, Mutex};
 use penumbra_core::error::Result;
 use penumbra_core::note::Note;
 use penumbra_embed::NullEmbedder;
-use penumbra_index::usearch_backend::USearchIndex;
+use penumbra_index::RuvectorIndex;
 use penumbra_index::VectorIndex;
 use penumbra_search::{SearchConfig, SearchEngine};
 
 fn make_index(dims: usize) -> Arc<Mutex<dyn VectorIndex>> {
-    Arc::new(Mutex::new(USearchIndex::new(dims).unwrap()))
+    Arc::new(Mutex::new(RuvectorIndex::new(dims).unwrap()))
 }
 
 fn make_engine_with_config(dims: usize, config: SearchConfig) -> SearchEngine {

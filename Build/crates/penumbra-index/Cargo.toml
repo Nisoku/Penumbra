@@ -6,4 +6,8 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
-usearch = "2"
+ruvector-core = { version = "2.2", default-features = false, features = ["memory-only", "uuid-support"] }
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

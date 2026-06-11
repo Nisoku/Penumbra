@@ -18,3 +18,5 @@ mod markdown_matrix;
 mod search_matrix;
 #[cfg(test)]
 mod storage_matrix;
+#[cfg(test)]
+mod sync_matrix;

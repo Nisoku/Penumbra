@@ -23,7 +23,7 @@ impl Storage {
     pub async fn new() -> Result<Self> {
         let root = app_specific_dir()
             .await
-            .map_err(|e| PenumbraError::Storage(format!("app dir: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("app dir: {e:?}")))?;
         Ok(Self { root })
     }
 
@@ -38,7 +38,7 @@ impl Storage {
                 &GetDirectoryHandleOptions { create: true },
             )
             .await
-            .map_err(|e| PenumbraError::Storage(format!("notes dir: {e}")))
+            .map_err(|e| PenumbraError::Storage(format!("notes dir: {e:?}")))
     }
 
     async fn note_file(&self, id: &NoteId) -> Result<FileHandle> {
@@ -46,7 +46,7 @@ impl Storage {
         let filename = format!("{}.json", id);
         dir.get_file_handle_with_options(&filename, &GetFileHandleOptions { create: true })
             .await
-            .map_err(|e| PenumbraError::Storage(format!("note file: {e}")))
+            .map_err(|e| PenumbraError::Storage(format!("note file: {e:?}")))
     }
 
     async fn write_json(&self, file: &mut FileHandle, json: String) -> Result<()> {
@@ -55,17 +55,17 @@ impl Storage {
                 keep_existing_data: false,
             })
             .await
-            .map_err(|e| PenumbraError::Storage(format!("create writable: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("create writable: {e:?}")))?;
 
         let bytes = json.into_bytes();
         writer
             .write_at_cursor_pos(&bytes)
             .await
-            .map_err(|e| PenumbraError::Storage(format!("write: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("write: {e:?}")))?;
         writer
             .close()
             .await
-            .map_err(|e| PenumbraError::Storage(format!("close: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("close: {e:?}")))?;
         Ok(())
     }
 
@@ -76,7 +76,7 @@ impl Storage {
         let data = file
             .read()
             .await
-            .map_err(|e| PenumbraError::Storage(format!("read: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("read: {e:?}")))?;
         if data.is_empty() {
             return Ok(None);
         }
@@ -88,7 +88,7 @@ impl Storage {
         self.root
             .get_file_handle_with_options(name, &GetFileHandleOptions { create })
             .await
-            .map_err(|e| PenumbraError::Storage(format!("file {name}: {e}")))
+            .map_err(|e| PenumbraError::Storage(format!("file {name}: {e:?}")))
     }
 
     // Notes
@@ -112,7 +112,7 @@ impl Storage {
         let filename = format!("{}.json", id);
         dir.remove_entry(&filename)
             .await
-            .map_err(|e| PenumbraError::Storage(format!("remove: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("remove: {e:?}")))?;
         Ok(())
     }
 
@@ -180,11 +180,11 @@ impl Storage {
         let mut stream = dir
             .entries()
             .await
-            .map_err(|e| PenumbraError::Storage(format!("entries: {e}")))?;
+            .map_err(|e| PenumbraError::Storage(format!("entries: {e:?}")))?;
 
         let mut ids = Vec::new();
         while let Some(entry) = stream.next().await {
-            let (name, _kind) = entry.map_err(|e| PenumbraError::Storage(format!("entry: {e}")))?;
+            let (name, _kind) = entry.map_err(|e| PenumbraError::Storage(format!("entry: {e:?}")))?;
             if let Some(stripped) = name.strip_suffix(".json") {
                 if let Ok(uuid) = uuid::Uuid::parse_str(stripped) {
                     ids.push(NoteId::from_raw(uuid));

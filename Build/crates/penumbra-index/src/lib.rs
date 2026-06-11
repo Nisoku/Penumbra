@@ -19,5 +19,5 @@ pub trait VectorIndex: Send + Sync {
     }
 }
 
-pub mod usearch_backend;
-pub use usearch_backend::USearchIndex;
+pub mod ruvector_backend;
+pub use ruvector_backend::RuvectorIndex;
