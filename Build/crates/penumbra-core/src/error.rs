@@ -26,6 +26,9 @@ pub enum PenumbraError {
     #[error("sync error: {0}")]
     Sync(String),
 
+    #[error("markdown error: {0}")]
+    Markdown(String),
+
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 

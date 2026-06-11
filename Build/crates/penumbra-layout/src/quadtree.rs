@@ -154,8 +154,8 @@ impl Quadrant {
 
         let dx = self.mass_cx - x;
         let dy = self.mass_cy - y;
-        let dist_sq = dx * dx + dy * dy;
-        let dist = dist_sq.sqrt().max(1.0);
+        let dist_sq = (dx * dx + dy * dy).max(1.0);
+        let dist = dist_sq.sqrt();
 
         if self.total_mass == 1 {
             if let Some(id) = self.single_id {

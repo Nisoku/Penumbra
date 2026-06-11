@@ -60,34 +60,38 @@ fn converges_eventually() {
 }
 
 #[test]
-fn incremental_step_matches_full_step_within_tolerance() {
-    let (mut engine_full, ids) = simple_graph();
-    let mut engine_inc = LayoutEngine::with_defaults();
-
-    for id in &ids {
-        if let Some(pos) = engine_full.get_position(id) {
-            engine_inc.add_node(*id, false);
-            engine_inc.set_position(id, pos);
-        }
-    }
-    engine_inc.update_links(vec![
-        Link::new(ids[0], ids[1], LinkKind::Explicit),
-        Link::new(ids[1], ids[2], LinkKind::Implicit),
-    ]);
-
-    // Pin the pinned node
-    engine_inc.pin(&ids[2], true);
-
+fn step_neighborhood_moves_only_affected_nodes() {
+    let (mut engine, ids) = simple_graph();
+    // ids[2] is pinned. Its neighbor is ids[1] via the implicit link.
+    // step_neighborhood should move ids[0] (not affected), move ids[1]
+    // (affected, not pinned), and not move ids[2] (affected, pinned).
     let center = ids[2];
-    engine_full.step();
-    engine_inc.step_neighborhood(&center);
+    let pos_a_before = engine.get_position(&ids[0]).unwrap();
+    let pos_b_before = engine.get_position(&ids[1]).unwrap();
+    let pos_c_before = engine.get_position(&ids[2]).unwrap();
 
-    for id in &ids {
-        let fp = engine_full.get_position(id).unwrap();
-        let ip = engine_inc.get_position(id).unwrap();
-        let diff = fp.distance_to(&ip);
-        assert!(diff < 1.0, "position diff too large: {}", diff);
-    }
+    let d = engine.step_neighborhood(&center);
+
+    assert!(d.is_finite(), "displacement should be finite: {}", d);
+    assert!(d > 0.0, "should have moved at least one node");
+    // Non-neighbor should NOT move
+    assert_eq!(
+        engine.get_position(&ids[0]).unwrap(),
+        pos_a_before,
+        "non-neighbor node should not move"
+    );
+    // Pinned neighbor should NOT move
+    assert_eq!(
+        engine.get_position(&ids[2]).unwrap(),
+        pos_c_before,
+        "pinned node should not move"
+    );
+    // Unpinned neighbor SHOULD move
+    assert_ne!(
+        engine.get_position(&ids[1]).unwrap(),
+        pos_b_before,
+        "unpinned neighbor should move"
+    );
 }
 
 #[test]

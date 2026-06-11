@@ -9,6 +9,7 @@ members = [
   "Build/crates/penumbra-index",
   "Build/crates/penumbra-search",
   "Build/crates/penumbra-storage",
+  "Build/crates/penumbra-markdown",
   "Build/crates/penumbra-sync",
   "Build/tests",
 ]

@@ -11,6 +11,8 @@ mod index_matrix;
 #[cfg(test)]
 mod layout_matrix;
 #[cfg(test)]
+mod markdown_matrix;
+#[cfg(test)]
 mod search_matrix;
 #[cfg(test)]
 mod storage_matrix;
