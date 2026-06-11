@@ -41,11 +41,8 @@ impl GraphStore {
     pub fn remove_note(&mut self, id: &NoteId) -> Option<Note> {
         let note = self.notes.remove(id)?;
         if let Some(&idx) = self.node_index.get(id) {
-            let neighbor_ids: Vec<NoteId> = self
-                .graph
-                .neighbors(idx)
-                .map(|n| self.graph[n].clone())
-                .collect();
+            let neighbor_ids: Vec<NoteId> =
+                self.graph.neighbors(idx).map(|n| self.graph[n]).collect();
             for neighbor_id in &neighbor_ids {
                 if let Some(&neighbor_idx) = self.node_index.get(neighbor_id) {
                     self.graph.remove_edge(
@@ -70,20 +67,16 @@ impl GraphStore {
     }
 
     pub fn update_note(&mut self, id: &NoteId, f: impl FnOnce(&mut Note)) -> Result<()> {
-        let note = self.notes.get_mut(id).ok_or_else(|| {
-            PenumbraError::NoteNotFound(id.to_string())
-        })?;
+        let note = self
+            .notes
+            .get_mut(id)
+            .ok_or_else(|| PenumbraError::NoteNotFound(id.to_string()))?;
         f(note);
         note.touch();
         Ok(())
     }
 
-    pub fn link_notes(
-        &mut self,
-        source: &NoteId,
-        target: &NoteId,
-        kind: LinkKind,
-    ) -> Result<Link> {
+    pub fn link_notes(&mut self, source: &NoteId, target: &NoteId, kind: LinkKind) -> Result<Link> {
         if !self.notes.contains_key(source) {
             return Err(PenumbraError::NoteNotFound(source.to_string()));
         }
@@ -107,21 +100,20 @@ impl GraphStore {
     }
 
     pub fn unlink_notes(&mut self, source: &NoteId, target: &NoteId) -> Result<Link> {
-        let source_idx = self.node_index.get(source).ok_or_else(|| {
-            PenumbraError::NoteNotFound(source.to_string())
-        })?;
-        let target_idx = self.node_index.get(target).ok_or_else(|| {
-            PenumbraError::NoteNotFound(target.to_string())
-        })?;
+        let source_idx = self
+            .node_index
+            .get(source)
+            .ok_or_else(|| PenumbraError::NoteNotFound(source.to_string()))?;
+        let target_idx = self
+            .node_index
+            .get(target)
+            .ok_or_else(|| PenumbraError::NoteNotFound(target.to_string()))?;
 
         let edge = self
             .graph
             .find_edge(*source_idx, *target_idx)
             .ok_or_else(|| {
-                PenumbraError::Graph(format!(
-                    "no link between {} and {}",
-                    source, target
-                ))
+                PenumbraError::Graph(format!("no link between {} and {}", source, target))
             })?;
 
         let link = self.graph.remove_edge(edge).unwrap();
@@ -147,10 +139,7 @@ impl GraphStore {
             Some(&idx) => idx,
             None => return Vec::new(),
         };
-        self.graph
-            .edges(idx)
-            .map(|e| e.weight())
-            .collect()
+        self.graph.edges(idx).map(|e| e.weight()).collect()
     }
 
     pub fn get_connected_component(&self, id: &NoteId) -> HashSet<NoteId> {
@@ -180,10 +169,7 @@ impl GraphStore {
     }
 
     pub fn all_links(&self) -> Vec<&Link> {
-        self.graph
-            .edge_indices()
-            .map(|e| &self.graph[e])
-            .collect()
+        self.graph.edge_indices().map(|e| &self.graph[e]).collect()
     }
 
     pub fn note_count(&self) -> usize {

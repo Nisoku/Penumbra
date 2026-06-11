@@ -108,12 +108,7 @@ impl Quadrant {
 
         if self.children.is_none() && self.half > MIN_CELL_HALF {
             let h = self.half / 2.0;
-            let offsets = [
-                (-1.0, -1.0),
-                (1.0, -1.0),
-                (-1.0, 1.0),
-                (1.0, 1.0),
-            ];
+            let offsets = [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)];
             let mut children: [Box<Quadrant>; 4] = offsets.map(|(dx, dy)| {
                 Box::new(Quadrant {
                     cx: self.cx + dx * h,

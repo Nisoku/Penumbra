@@ -193,8 +193,7 @@ impl LayoutEngine {
             if state.pinned {
                 continue;
             }
-            let dist = (state.position.x * state.position.x
-                + state.position.y * state.position.y)
+            let dist = (state.position.x * state.position.x + state.position.y * state.position.y)
                 .sqrt()
                 .max(1.0);
             let acc = accumulators.get_mut(id).unwrap();
@@ -365,8 +364,7 @@ impl LayoutEngine {
             if state.pinned {
                 continue;
             }
-            let dist = (state.position.x * state.position.x
-                + state.position.y * state.position.y)
+            let dist = (state.position.x * state.position.x + state.position.y * state.position.y)
                 .sqrt()
                 .max(1.0);
             let acc = accumulators.get_mut(nid).unwrap();

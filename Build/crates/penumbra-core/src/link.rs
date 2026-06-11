@@ -22,11 +22,7 @@ impl Link {
             source,
             target,
             kind,
-            weight: if kind == LinkKind::Explicit {
-                1.0
-            } else {
-                0.5
-            },
+            weight: if kind == LinkKind::Explicit { 1.0 } else { 0.5 },
         }
     }
 

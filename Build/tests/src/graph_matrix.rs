@@ -1,6 +1,6 @@
 use penumbra_core::link::LinkKind;
-use penumbra_graph::GraphStore;
 use penumbra_core::note::Note;
+use penumbra_graph::GraphStore;
 
 #[test]
 fn add_and_retrieve_note() {

@@ -6,3 +6,10 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
+opfs = "0.2"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+futures.workspace = true

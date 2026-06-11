@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
+usearch = "2"

@@ -14,6 +14,9 @@ pub enum PenumbraError {
     #[error("embedding error: {0}")]
     Embedding(String),
 
+    #[error("index error: {0}")]
+    Index(String),
+
     #[error("search error: {0}")]
     Search(String),
 
