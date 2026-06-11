@@ -184,7 +184,8 @@ impl Storage {
 
         let mut ids = Vec::new();
         while let Some(entry) = stream.next().await {
-            let (name, _kind) = entry.map_err(|e| PenumbraError::Storage(format!("entry: {e:?}")))?;
+            let (name, _kind) =
+                entry.map_err(|e| PenumbraError::Storage(format!("entry: {e:?}")))?;
             if let Some(stripped) = name.strip_suffix(".json") {
                 if let Ok(uuid) = uuid::Uuid::parse_str(stripped) {
                     ids.push(NoteId::from_raw(uuid));

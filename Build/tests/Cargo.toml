@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+candle = ["penumbra-embed/candle", "dep:tokenizers", "dep:candle-core", "dep:candle-nn"]
+candle-load = ["penumbra-embed/candle-load", "candle"]
+
 [dependencies]
 penumbra-core = { path = "../crates/penumbra-core" }
 penumbra-graph = { path = "../crates/penumbra-graph" }
@@ -23,3 +28,6 @@ chrono.workspace = true
 tokio = { version = "1", features = ["rt", "macros"] }
 async-channel = "2"
 pollster = "0.4"
+tokenizers = { version = "0.23.1", optional = true, default-features = false, features = ["fancy-regex"] }
+candle-core = { version = "0.10.2", optional = true, default-features = false }
+candle-nn = { version = "0.10.2", optional = true }

@@ -1,13 +1,17 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use candle_core::{Device, Tensor};
+use candle_core::{Device, Error as CandleError, Tensor};
+use candle_nn::Module;
 use penumbra_core::embed::{Embedding, EmbeddingProvider};
 use penumbra_core::error::{PenumbraError, Result};
 use tokenizers::Tokenizer;
 
+#[cfg(feature = "candle-load")]
 const MODEL_ID: &str = "Snowflake/snowflake-arctic-embed-xs";
 const DEFAULT_SEQUENCE_LENGTH: usize = 512;
+
+fn e_msg(e: impl std::fmt::Display) -> PenumbraError {
+    PenumbraError::Embedding(e.to_string())
+}
 
 pub struct CandleEmbedder {
     model: ArcticEmbedXS,
@@ -24,36 +28,58 @@ impl CandleEmbedder {
         }
     }
 
-    /// Load the model and tokenizer from HuggingFace Hub or local cache.
+    /// Download the model and tokenizer from HuggingFace Hub and load into memory.
+    #[cfg(feature = "candle-load")]
     pub async fn load() -> Result<Self> {
-        let api = hf_hub::api::sync::Api::new()?;
-        let model_path = api.model(MODEL_ID.to_string()).get("model.safetensors")?;
-        let config_path = api.model(MODEL_ID.to_string()).get("config.json")?;
-        let tokenizer_path = api.model(MODEL_ID.to_string()).get("tokenizer.json")?;
+        let client = reqwest::Client::new();
+
+        let model_bytes = Self::download(&client, "model.safetensors").await?;
+        let config_bytes = Self::download(&client, "config.json").await?;
+        let tokenizer_bytes = Self::download(&client, "tokenizer.json").await?;
 
         let device = Device::Cpu;
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
+        let tokenizer = Tokenizer::from_bytes(&tokenizer_bytes)
             .map_err(|e| PenumbraError::Embedding(format!("failed to load tokenizer: {e}")))?;
 
-        let config: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
+        let config: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(e_msg)?;
         let hidden_size = config["hidden_size"].as_u64().unwrap_or(384) as usize;
+        let vocab_size = config["vocab_size"].as_u64().unwrap_or(30522) as usize;
 
-        let vb = unsafe {
-            candle_nn::VarBuilder::from_mmaped_safetensors(
-                &[model_path],
-                candle_core::DType::F32,
-                &device,
-            )?
-        };
+        let vb = candle_nn::VarBuilder::from_buffered_safetensors(
+            model_bytes,
+            candle_core::DType::F32,
+            &device,
+        )
+        .map_err(e_msg)?;
 
-        let model = ArcticEmbedXS::new(hidden_size, vb)?;
+        let model = ArcticEmbedXS::new(vocab_size, hidden_size, vb).map_err(e_msg)?;
 
         Ok(Self {
             model,
             tokenizer,
             device,
         })
+    }
+
+    #[cfg(feature = "candle-load")]
+    async fn download(client: &reqwest::Client, filename: &str) -> Result<Vec<u8>> {
+        let url = format!("https://huggingface.co/{MODEL_ID}/resolve/main/{filename}");
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| PenumbraError::Embedding(format!("download failed: {e}")))?;
+        if !response.status().is_success() {
+            return Err(PenumbraError::Embedding(format!(
+                "HTTP {} downloading {filename}",
+                response.status()
+            )));
+        }
+        response
+            .bytes()
+            .await
+            .map_err(|e| PenumbraError::Embedding(format!("read response failed: {e}")))
+            .map(|b| b.to_vec())
     }
 }
 
@@ -69,16 +95,28 @@ impl EmbeddingProvider for CandleEmbedder {
         let len = ids.len().min(DEFAULT_SEQUENCE_LENGTH);
         let ids = &ids[..len];
 
-        let input = Tensor::new(ids, &self.device)?.unsqueeze(0)?;
-        let mask = Tensor::ones(&[1, len], candle_core::DType::U32, &self.device)?;
+        let input = Tensor::new(ids, &self.device)
+            .map_err(e_msg)?
+            .unsqueeze(0)
+            .map_err(e_msg)?;
+        let mask = Tensor::ones(&[1, len], candle_core::DType::U32, &self.device).map_err(e_msg)?;
 
-        let embedding = self.model.forward(&input, &mask)?;
+        let embedding = self.model.forward(&input, &mask).map_err(e_msg)?;
 
         // L2-normalize
-        let norm = embedding.sqr()?.sum_all()?.sqrt()?.to_scalar::<f32>()?;
-        let normalized = embedding.broadcast_div(&Tensor::new(norm, &self.device)?)?;
+        let squared_sum = embedding
+            .powf(2.0)
+            .map_err(e_msg)?
+            .sum_all()
+            .map_err(e_msg)?;
+        let norm = squared_sum.powf(0.5).map_err(e_msg)?;
+        let normalized = embedding.broadcast_div(&norm).map_err(e_msg)?;
 
-        let vec: Vec<f32> = normalized.flatten_all()?.to_vec1()?;
+        let vec: Vec<f32> = normalized
+            .flatten_all()
+            .map_err(e_msg)?
+            .to_vec1()
+            .map_err(e_msg)?;
         Ok(vec)
     }
 
@@ -88,9 +126,6 @@ impl EmbeddingProvider for CandleEmbedder {
 }
 
 /// Minimal BERT-style embedding model.
-///
-/// This is a simplified forward pass that will be replaced with the actual
-/// ONNX-transformed or Candle-native model once the architecture is confirmed.
 pub struct ArcticEmbedXS {
     hidden_size: usize,
     embed: candle_nn::Embedding,
@@ -98,9 +133,14 @@ pub struct ArcticEmbedXS {
 }
 
 impl ArcticEmbedXS {
-    fn new(hidden_size: usize, vb: candle_nn::VarBuilder) -> Result<Self> {
-        let embed = candle_nn::embedding(30522, hidden_size, &vb.pp("embeddings.word_embeddings"))?;
-        let encoder = candle_nn::linear(hidden_size, hidden_size, &vb.pp("encoder.layer.0"))?;
+    pub fn new(
+        vocab_size: usize,
+        hidden_size: usize,
+        vb: candle_nn::VarBuilder,
+    ) -> std::result::Result<Self, CandleError> {
+        let embed =
+            candle_nn::embedding(vocab_size, hidden_size, vb.pp("embeddings.word_embeddings"))?;
+        let encoder = candle_nn::linear(hidden_size, hidden_size, vb.pp("encoder.layer.0"))?;
 
         Ok(Self {
             hidden_size,
@@ -109,9 +149,13 @@ impl ArcticEmbedXS {
         })
     }
 
-    fn forward(&self, input_ids: &Tensor, _attention_mask: &Tensor) -> Result<Tensor> {
+    pub fn forward(
+        &self,
+        input_ids: &Tensor,
+        _attention_mask: &Tensor,
+    ) -> std::result::Result<Tensor, CandleError> {
         let x = self.embed.forward(input_ids)?;
-        let x = x.mean(1)?; // Mean pooling
+        let x = x.mean(1)?;
         let x = self.encoder.forward(&x)?;
         Ok(x)
     }

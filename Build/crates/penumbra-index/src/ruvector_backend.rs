@@ -1,10 +1,8 @@
+use crate::{SearchHit, VectorIndex};
 use penumbra_core::error::{PenumbraError, Result};
 use penumbra_core::note::NoteId;
-use ruvector_core::types::{
-    DbOptions, DistanceMetric, HnswConfig, SearchQuery, VectorEntry,
-};
+use ruvector_core::types::{DbOptions, DistanceMetric, HnswConfig, SearchQuery, VectorEntry};
 use ruvector_core::VectorDB;
-use crate::{SearchHit, VectorIndex};
 
 /// A vector index backed by `ruvector-core` (pure Rust, WASM-compatible).
 pub struct RuvectorIndex {
