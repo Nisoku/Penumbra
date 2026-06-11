@@ -66,8 +66,9 @@ impl From<&LayoutConfig> for GpuConfig {
 ///
 /// Wraps `vibe-graph-layout-gpu::GpuLayout` and maps between Penumbra's domain
 /// types (NoteId, f64 positions, Links) and the GPU crate's types (u32 indices,
-/// f32 positions, Edges). GPU initialization is deferred until the first `step()`
-/// call so construction is synchronous.
+/// f32 positions, Edges). GPU initialisation happens in [`new`] so it must be
+/// awaited. If GPU creation fails the engine still exists but `step()` returns
+/// zero displacement (graceful degradation for headless / WebGPU-less enviros).
 pub struct LayoutEngine {
     inner: Option<GpuLayout>,
     nodes: Vec<NoteId>,
@@ -79,13 +80,17 @@ pub struct LayoutEngine {
     config: LayoutConfig,
     iteration: usize,
     dirty: bool,
-    initialized: bool,
 }
 
 impl LayoutEngine {
-    pub fn new(config: LayoutConfig) -> Self {
+    /// Create a new layout engine, initialising the GPU backend immediately.
+    ///
+    /// Returns `LayoutEngine` even if GPU creation fails — `step()` gracefully
+    /// returns zero displacement when no GPU is available.
+    pub async fn new(config: LayoutConfig) -> Self {
+        let gpu = GpuLayout::new(GpuConfig::from(&config)).await.ok();
         Self {
-            inner: None,
+            inner: gpu,
             nodes: Vec::new(),
             index_map: HashMap::new(),
             positions: Vec::new(),
@@ -95,12 +100,11 @@ impl LayoutEngine {
             config,
             iteration: 0,
             dirty: false,
-            initialized: false,
         }
     }
 
-    pub fn with_defaults() -> Self {
-        Self::new(LayoutConfig::default())
+    pub async fn with_defaults() -> Self {
+        Self::new(LayoutConfig::default()).await
     }
 
     pub fn add_node(&mut self, id: NoteId, pinned: bool) {
@@ -223,7 +227,6 @@ impl LayoutEngine {
     /// Run a single iteration of the force-directed layout.
     ///
     /// Returns the average displacement of non-pinned nodes.
-    /// GPU initialization happens lazily on the first call.
     pub fn step(&mut self) -> f64 {
         if self.nodes.is_empty() {
             self.iteration += 1;
@@ -232,54 +235,26 @@ impl LayoutEngine {
 
         let old_positions: Vec<VibePos> = self.positions.clone();
 
-        // No edges means no forces so skip GPU (zero-sized storage buffers
-        // are rejected by wgpu validation)
-        if !self.edges.is_empty() {
-            // Lazy GPU initialization
-            if !self.initialized {
-                let gpu_config = GpuConfig::from(&self.config);
-                let mut gpu = match pollster::block_on(GpuLayout::new(gpu_config)) {
-                    Ok(g) => g,
-                    Err(e) => {
-                        tracing::error!("Failed to initialize GPU layout: {e}");
-                        self.iteration += 1;
-                        return 0.0;
-                    }
-                };
-                if let Err(e) = gpu.init(self.positions.clone(), self.edges.clone()) {
-                    tracing::error!("Failed to init GPU layout: {e}");
-                    self.iteration += 1;
-                    return 0.0;
-                }
-                gpu.start();
-                self.inner = Some(gpu);
-                self.initialized = true;
-                self.dirty = false;
-            }
-
-            // Re-init if the graph changed
-            if self.dirty {
-                if let Some(ref mut gpu) = self.inner {
-                    if gpu
-                        .init(self.positions.clone(), self.edges.clone())
-                        .is_err()
-                    {
-                        self.iteration += 1;
-                        return 0.0;
-                    }
+        // GPU step (skipped when no backend or empty edges — wgpu rejects
+        // zero-sized storage buffers).
+        if let Some(ref mut gpu) = self.inner {
+            if !self.edges.is_empty() {
+                // Re-init when the graph structure changed
+                if self.dirty {
+                    let _ = gpu.init(self.positions.clone(), self.edges.clone());
                     gpu.start();
+                    self.dirty = false;
                 }
-                self.dirty = false;
-            }
 
-            let result = self.inner.as_mut().map(|gpu| gpu.step());
-            match result {
-                Some(Ok(new_positions)) => {
-                    self.positions.copy_from_slice(new_positions);
-                }
-                _ => {
-                    self.iteration += 1;
-                    return 0.0;
+                match gpu.step() {
+                    Ok(new_positions) => {
+                        self.positions.copy_from_slice(new_positions);
+                    }
+                    Err(e) => {
+                        tracing::error!("GPU layout step failed: {e}");
+                        self.iteration += 1;
+                        return 0.0;
+                    }
                 }
             }
         }

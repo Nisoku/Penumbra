@@ -4,7 +4,7 @@ use penumbra_core::position::{Bounds, Position};
 use penumbra_layout::LayoutEngine;
 
 fn simple_graph() -> (LayoutEngine, Vec<NoteId>) {
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     let a = NoteId::new();
     let b = NoteId::new();
     let c = NoteId::new();
@@ -31,7 +31,7 @@ fn layout_runs_steps() {
 
 #[test]
 fn pinned_node_does_not_move() {
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     let pinned = NoteId::new();
     let other = NoteId::new();
     engine.add_node(pinned, true);
@@ -94,7 +94,7 @@ fn step_moves_unpinned_nodes() {
 
 #[test]
 fn empty_engine_does_not_panic() {
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     let d = engine.step();
     assert_eq!(d, 0.0);
     assert_eq!(engine.iteration_count(), 1);
@@ -105,7 +105,7 @@ fn collision_resolves_overlap() {
     let a = NoteId::new();
     let b = NoteId::new();
 
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     engine.add_node(a, false);
     engine.add_node(b, false);
     // Place nodes at the same position so they overlap.
@@ -144,7 +144,7 @@ fn collision_skipped_without_bounds() {
     let a = NoteId::new();
     let b = NoteId::new();
 
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     engine.add_node(a, false);
     engine.add_node(b, false);
     // Same position, but NO bounds set. Collision avoidance is a no-op.
@@ -169,7 +169,7 @@ fn collision_pinned_node_stays() {
     let a = NoteId::new();
     let b = NoteId::new();
 
-    let mut engine = LayoutEngine::with_defaults();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     engine.add_node(a, true); // pinned
     engine.add_node(b, false);
     engine.set_position(&a, Position::new(100.0, 100.0));

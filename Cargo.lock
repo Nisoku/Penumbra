@@ -1936,7 +1936,6 @@ name = "penumbra-layout"
 version = "0.1.0"
 dependencies = [
  "penumbra-core",
- "pollster",
  "tracing",
  "vibe-graph-layout-gpu",
 ]
@@ -2001,6 +2000,7 @@ dependencies = [
  "penumbra-markdown",
  "penumbra-search",
  "penumbra-storage",
+ "pollster",
  "serde_json",
  "tokio",
  "uuid",
