@@ -6,3 +6,6 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
+vibe-graph-layout-gpu = "0.1.1"
+pollster = "0.4"
+tracing = { workspace = true }

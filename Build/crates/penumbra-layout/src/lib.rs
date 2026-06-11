@@ -1,75 +1,90 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use penumbra_core::link::Link;
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
+use vibe_graph_layout_gpu::{
+    Edge as VibeEdge, GpuLayout, LayoutConfig as GpuConfig, Position as VibePos,
+};
 
-pub mod quadtree;
-
-use quadtree::BarnesHutTree;
-
+/// Configuration for the GPU-accelerated layout engine.
 #[derive(Debug, Clone)]
 pub struct LayoutConfig {
-    /// Global scaling for repulsive forces.
-    pub scaling_ratio: f64,
-    /// Gravitational constant pulling nodes toward center.
-    pub gravity: f64,
-    /// Barnes-Hut approximation threshold (higher = faster but less accurate).
-    pub barnes_hut_theta: f64,
+    pub dt: f32,
+    pub damping: f32,
+    pub repulsion: f32,
+    pub attraction: f32,
+    pub theta: f32,
+    pub gravity: f32,
+    pub ideal_length: f32,
     pub max_iterations: usize,
-    /// Average displacement below which layout is considered converged.
     pub convergence_threshold: f64,
-    pub initial_speed: f64,
-    pub max_speed: f64,
-    pub tolerance: f64,
 }
 
 impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
-            scaling_ratio: 2.0,
-            gravity: 1.0,
-            barnes_hut_theta: 1.2,
+            dt: 0.016,
+            damping: 0.9,
+            repulsion: 1000.0,
+            attraction: 0.01,
+            theta: 0.8,
+            gravity: 0.1,
+            ideal_length: 50.0,
             max_iterations: 200,
             convergence_threshold: 0.1,
-            initial_speed: 1.0,
-            max_speed: 10.0,
-            tolerance: 0.1,
         }
     }
 }
 
-/// Tracks force accumulation for a single node during one layout step.
-#[derive(Debug, Clone, Default)]
-struct ForceAccumulator {
-    fx: f64,
-    fy: f64,
-    /// Number of Barnes-Hut approximations folded into this accumulator
-    /// (used for adaptive scaling).
-    approximation_count: usize,
+impl From<&LayoutConfig> for GpuConfig {
+    fn from(c: &LayoutConfig) -> Self {
+        Self {
+            dt: c.dt,
+            damping: c.damping,
+            repulsion: c.repulsion,
+            attraction: c.attraction,
+            theta: c.theta,
+            gravity: c.gravity,
+            ideal_length: c.ideal_length,
+            use_barnes_hut: true,
+            max_tree_depth: 12,
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
-struct NodeState {
-    position: Position,
-    velocity: (f64, f64),
-    pinned: bool,
-}
-
+/// GPU-accelerated force-directed graph layout engine.
+///
+/// Wraps `vibe-graph-layout-gpu::GpuLayout` and maps between Penumbra's domain
+/// types (NoteId, f64 positions, Links) and the GPU crate's types (u32 indices,
+/// f32 positions, Edges). GPU initialization is deferred until the first `step()`
+/// call so construction is synchronous.
 pub struct LayoutEngine {
-    nodes: HashMap<NoteId, NodeState>,
-    links: Vec<Link>,
+    inner: Option<GpuLayout>,
+    nodes: Vec<NoteId>,
+    index_map: HashMap<NoteId, u32>,
+    positions: Vec<VibePos>,
+    edges: Vec<VibeEdge>,
+    pinned: HashMap<NoteId, VibePos>,
     config: LayoutConfig,
     iteration: usize,
+    dirty: bool,
+    initialized: bool,
 }
 
 impl LayoutEngine {
     pub fn new(config: LayoutConfig) -> Self {
         Self {
-            nodes: HashMap::new(),
-            links: Vec::new(),
+            inner: None,
+            nodes: Vec::new(),
+            index_map: HashMap::new(),
+            positions: Vec::new(),
+            edges: Vec::new(),
+            pinned: HashMap::new(),
             config,
             iteration: 0,
+            dirty: false,
+            initialized: false,
         }
     }
 
@@ -78,46 +93,95 @@ impl LayoutEngine {
     }
 
     pub fn add_node(&mut self, id: NoteId, pinned: bool) {
+        if self.index_map.contains_key(&id) {
+            return;
+        }
+        let idx = self.nodes.len() as u32;
+        self.nodes.push(id);
+        self.index_map.insert(id, idx);
+
         let pos = Self::random_position();
-        self.nodes.insert(
-            id,
-            NodeState {
-                position: pos,
-                velocity: (0.0, 0.0),
-                pinned,
-            },
-        );
+        self.positions.push(VibePos::new(pos.x, pos.y));
+
+        if pinned {
+            self.pinned.insert(id, VibePos::new(pos.x, pos.y));
+        }
+        self.dirty = true;
     }
 
     pub fn remove_node(&mut self, id: &NoteId) {
-        self.nodes.remove(id);
-        self.links.retain(|l| l.source != *id && l.target != *id);
+        let Some(&idx) = self.index_map.get(id) else {
+            return;
+        };
+        self.nodes.remove(idx as usize);
+        self.positions.remove(idx as usize);
+        self.index_map.remove(id);
+        self.pinned.remove(id);
+
+        // Rebuild index map since indices shifted
+        self.index_map.clear();
+        for (i, nid) in self.nodes.iter().enumerate() {
+            self.index_map.insert(*nid, i as u32);
+        }
+
+        // Remove edges touching this node
+        self.edges.retain(|e| {
+            let src = self.nodes.get(e.source as usize);
+            let tgt = self.nodes.get(e.target as usize);
+            src.is_some() && tgt.is_some()
+        });
+
+        self.dirty = true;
     }
 
     pub fn update_links(&mut self, links: Vec<Link>) {
-        self.links = links;
+        self.edges = links
+            .iter()
+            .filter_map(|link| {
+                let src = self.index_map.get(&link.source).copied()?;
+                let tgt = self.index_map.get(&link.target).copied()?;
+                Some(VibeEdge::new(src, tgt))
+            })
+            .collect();
+        self.dirty = true;
     }
 
     pub fn set_position(&mut self, id: &NoteId, pos: Position) {
-        if let Some(node) = self.nodes.get_mut(id) {
-            node.position = pos;
+        let Some(&idx) = self.index_map.get(id) else {
+            return;
+        };
+        self.positions[idx as usize] = VibePos::new(pos.x as f32, pos.y as f32);
+        // Also update pinned position if this node is pinned
+        if self.pinned.contains_key(id) {
+            self.pinned
+                .insert(*id, VibePos::new(pos.x as f32, pos.y as f32));
         }
+        self.dirty = true;
     }
 
     pub fn pin(&mut self, id: &NoteId, pinned: bool) {
-        if let Some(node) = self.nodes.get_mut(id) {
-            node.pinned = pinned;
+        if pinned {
+            if let Some(&idx) = self.index_map.get(id) {
+                self.pinned.insert(*id, self.positions[idx as usize]);
+            }
+        } else {
+            self.pinned.remove(id);
         }
     }
 
     pub fn get_position(&self, id: &NoteId) -> Option<Position> {
-        self.nodes.get(id).map(|n| n.position)
+        let &idx = self.index_map.get(id)?;
+        let p = self.positions[idx as usize];
+        Some(Position::new(p.x as f64, p.y as f64))
     }
 
     pub fn all_positions(&self) -> HashMap<NoteId, Position> {
         self.nodes
             .iter()
-            .map(|(id, state)| (*id, state.position))
+            .map(|id| {
+                let pos = self.get_position(id).unwrap();
+                (*id, pos)
+            })
             .collect()
     }
 
@@ -129,111 +193,101 @@ impl LayoutEngine {
         self.iteration
     }
 
-    /// Run a single iteration of the ForceAtlas2 algorithm.
+    /// Run a single iteration of the force-directed layout.
     ///
-    /// Returns the average displacement for convergence checking.
+    /// Returns the average displacement of non-pinned nodes.
+    /// GPU initialization happens lazily on the first call.
     pub fn step(&mut self) -> f64 {
         if self.nodes.is_empty() {
             self.iteration += 1;
             return 0.0;
         }
 
-        let n = self.nodes.len();
-        let mut accumulators: HashMap<NoteId, ForceAccumulator> = self
-            .nodes
-            .keys()
-            .map(|id| (*id, ForceAccumulator::default()))
-            .collect();
-
-        let tree = BarnesHutTree::build(&self.nodes);
-
-        // Repulsive forces: Barnes-Hut approximation
-        let theta = self.config.barnes_hut_theta;
-        for (id, state) in &self.nodes {
-            if state.pinned {
-                continue;
-            }
-            let acc = accumulators.get_mut(id).unwrap();
-            tree.apply_repulsive(id, &state.position, theta, self.config.scaling_ratio, acc);
+        // No edges means no forces so skip GPU (zero-sized storage buffers
+        // are rejected by wgpu validation) and treat as a no-op step.
+        if self.edges.is_empty() {
+            self.iteration += 1;
+            return 0.0;
         }
 
-        // Attractive forces: along edges
-        for link in &self.links {
-            let Some(source_state) = self.nodes.get(&link.source) else {
-                continue;
-            };
-            let Some(target_state) = self.nodes.get(&link.target) else {
-                continue;
-            };
-
-            let dx = target_state.position.x - source_state.position.x;
-            let dy = target_state.position.y - source_state.position.y;
-            let dist_sq = dx * dx + dy * dy;
-            let dist = dist_sq.sqrt().max(1.0);
-
-            let force = link.weight * dist;
-
-            if let Some(acc) = accumulators.get_mut(&link.source) {
-                if !source_state.pinned {
-                    acc.fx += force * dx / dist;
-                    acc.fy += force * dy / dist;
+        // Lazy GPU initialization on first step
+        if !self.initialized {
+            let gpu_config = GpuConfig::from(&self.config);
+            let mut gpu = match pollster::block_on(GpuLayout::new(gpu_config)) {
+                Ok(g) => g,
+                Err(e) => {
+                    tracing::error!("Failed to initialize GPU layout: {e}");
+                    self.iteration += 1;
+                    return 0.0;
                 }
-            }
-            if let Some(acc) = accumulators.get_mut(&link.target) {
-                if !target_state.pinned {
-                    acc.fx -= force * dx / dist;
-                    acc.fy -= force * dy / dist;
-                }
-            }
-        }
-
-        // Gravity
-        let gravity = self.config.gravity;
-        for (id, state) in &self.nodes {
-            if state.pinned {
-                continue;
-            }
-            let dist = (state.position.x * state.position.x + state.position.y * state.position.y)
-                .sqrt()
-                .max(1.0);
-            let acc = accumulators.get_mut(id).unwrap();
-            acc.fx -= gravity * state.position.x / dist;
-            acc.fy -= gravity * state.position.y / dist;
-        }
-
-        // Apply forces with adaptive speed
-        let speed = self.adaptive_speed(&accumulators);
-        let mut total_displacement = 0.0;
-
-        for (id, state) in self.nodes.iter_mut() {
-            if state.pinned {
-                continue;
-            }
-            let acc = &accumulators[id];
-
-            let delta_x = acc.fx * speed;
-            let delta_y = acc.fy * speed;
-
-            // Clamp displacement
-            let delta_dist = (delta_x * delta_x + delta_y * delta_y).sqrt();
-            let max_dist = self.config.max_speed * speed;
-            let (clamped_dx, clamped_dy) = if delta_dist > max_dist {
-                let scale = max_dist / delta_dist;
-                (delta_x * scale, delta_y * scale)
-            } else {
-                (delta_x, delta_y)
             };
+            if let Err(e) = gpu.init(self.positions.clone(), self.edges.clone()) {
+                tracing::error!("Failed to init GPU layout: {e}");
+                self.iteration += 1;
+                return 0.0;
+            }
+            gpu.start();
+            self.inner = Some(gpu);
+            self.initialized = true;
+            self.dirty = false;
+        }
 
-            state.position.x += clamped_dx;
-            state.position.y += clamped_dy;
+        // Re-init if the graph changed
+        if self.dirty {
+            if let Some(ref mut gpu) = self.inner {
+                if gpu
+                    .init(self.positions.clone(), self.edges.clone())
+                    .is_err()
+                {
+                    self.iteration += 1;
+                    return 0.0;
+                }
+                gpu.start();
+            }
+            self.dirty = false;
+        }
 
-            state.velocity = (clamped_dx / speed, clamped_dy / speed);
+        let old_positions: Vec<VibePos> = self.positions.clone();
 
-            total_displacement += (clamped_dx * clamped_dx + clamped_dy * clamped_dy).sqrt();
+        let result = self.inner.as_mut().map(|gpu| gpu.step());
+        match result {
+            Some(Ok(new_positions)) => {
+                self.positions.copy_from_slice(new_positions);
+            }
+            _ => {
+                self.iteration += 1;
+                return 0.0;
+            }
+        }
+
+        // Restore pinned node positions
+        for (id, pin_pos) in &self.pinned {
+            if let Some(&idx) = self.index_map.get(id) {
+                self.positions[idx as usize] = *pin_pos;
+            }
+        }
+
+        // Calculate average displacement for non-pinned nodes
+        let mut total_disp = 0.0f64;
+        let mut count = 0u32;
+        for (i, nid) in self.nodes.iter().enumerate() {
+            if self.pinned.contains_key(nid) {
+                continue;
+            }
+            let old = &old_positions[i];
+            let new = &self.positions[i];
+            let dx = new.x as f64 - old.x as f64;
+            let dy = new.y as f64 - old.y as f64;
+            total_disp += (dx * dx + dy * dy).sqrt();
+            count += 1;
         }
 
         self.iteration += 1;
-        total_displacement / n as f64
+        if count == 0 {
+            0.0
+        } else {
+            total_disp / count as f64
+        }
     }
 
     /// Run the layout to convergence or max iterations.
@@ -251,20 +305,15 @@ impl LayoutEngine {
         self.iteration - start
     }
 
-    fn adaptive_speed(&self, accumulators: &HashMap<NoteId, ForceAccumulator>) -> f64 {
-        let mut total_force = 0.0f64;
-        let mut count = 0.0f64;
-        for acc in accumulators.values() {
-            let force = (acc.fx * acc.fx + acc.fy * acc.fy).sqrt();
-            total_force += force;
-            count += 1.0;
-        }
-        let avg_force = total_force / f64::max(count, 1.0);
-        let speed = (self.config.initial_speed * self.config.tolerance) / avg_force.max(0.001);
-        speed.clamp(0.01, self.config.max_speed)
+    /// Incremental step that moves only the neighborhood of a given node.
+    ///
+    /// Note: with GPU acceleration the full graph is always computed, so this
+    /// is functionally equivalent to `step()`.
+    pub fn step_neighborhood(&mut self, _id: &NoteId) -> f64 {
+        self.step()
     }
 
-    fn random_position() -> Position {
+    fn random_position() -> VibePos {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -273,132 +322,6 @@ impl LayoutEngine {
         let seed = nanos as f64;
         let angle = seed * std::f64::consts::TAU / 1_000_000_000.0;
         let radius = 50.0 + (seed % 200.0);
-        Position::new(angle.cos() * radius, angle.sin() * radius)
-    }
-
-    /// Incremental update: only recalculate forces for a specific node
-    /// and its neighbors. Other nodes keep their positions.
-    pub fn step_neighborhood(&mut self, id: &NoteId) -> f64 {
-        let neighbor_ids: HashSet<NoteId> = self
-            .links
-            .iter()
-            .filter_map(|l| {
-                if l.source == *id {
-                    Some(l.target)
-                } else if l.target == *id {
-                    Some(l.source)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let mut affected = neighbor_ids.clone();
-        affected.insert(*id);
-
-        // Full step for the whole graph is still needed for Barnes-Hut accuracy,
-        // but we only update positions of affected nodes.
-        if self.nodes.is_empty() {
-            return 0.0;
-        }
-
-        let tree = BarnesHutTree::build(&self.nodes);
-
-        let mut accumulators: HashMap<NoteId, ForceAccumulator> = self
-            .nodes
-            .keys()
-            .map(|id| (*id, ForceAccumulator::default()))
-            .collect();
-
-        let theta = self.config.barnes_hut_theta;
-
-        for nid in &affected {
-            let Some(state) = self.nodes.get(nid) else {
-                continue;
-            };
-            if state.pinned {
-                continue;
-            }
-            let acc = accumulators.get_mut(nid).unwrap();
-            tree.apply_repulsive(nid, &state.position, theta, self.config.scaling_ratio, acc);
-        }
-
-        for link in &self.links {
-            if !affected.contains(&link.source) && !affected.contains(&link.target) {
-                continue;
-            }
-            let Some(source_state) = self.nodes.get(&link.source) else {
-                continue;
-            };
-            let Some(target_state) = self.nodes.get(&link.target) else {
-                continue;
-            };
-            let dx = target_state.position.x - source_state.position.x;
-            let dy = target_state.position.y - source_state.position.y;
-            let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-            let force = link.weight * dist;
-
-            if affected.contains(&link.source) {
-                if let Some(acc) = accumulators.get_mut(&link.source) {
-                    if !source_state.pinned {
-                        acc.fx += force * dx / dist;
-                        acc.fy += force * dy / dist;
-                    }
-                }
-            }
-            if affected.contains(&link.target) {
-                if let Some(acc) = accumulators.get_mut(&link.target) {
-                    if !target_state.pinned {
-                        acc.fx -= force * dx / dist;
-                        acc.fy -= force * dy / dist;
-                    }
-                }
-            }
-        }
-
-        let gravity = self.config.gravity;
-        for nid in &affected {
-            let Some(state) = self.nodes.get(nid) else {
-                continue;
-            };
-            if state.pinned {
-                continue;
-            }
-            let dist = (state.position.x * state.position.x + state.position.y * state.position.y)
-                .sqrt()
-                .max(1.0);
-            let acc = accumulators.get_mut(nid).unwrap();
-            acc.fx -= gravity * state.position.x / dist;
-            acc.fy -= gravity * state.position.y / dist;
-        }
-
-        let speed = self.adaptive_speed(&accumulators);
-        let mut total_displacement = 0.0;
-
-        for nid in &affected {
-            let Some(state) = self.nodes.get_mut(nid) else {
-                continue;
-            };
-            if state.pinned {
-                continue;
-            }
-            let acc = &accumulators[nid];
-            let delta_x = acc.fx * speed;
-            let delta_y = acc.fy * speed;
-            let delta_dist = (delta_x * delta_x + delta_y * delta_y).sqrt();
-            let max_d = self.config.max_speed * speed;
-            let (cdx, cdy) = if delta_dist > max_d {
-                let s = max_d / delta_dist;
-                (delta_x * s, delta_y * s)
-            } else {
-                (delta_x, delta_y)
-            };
-            state.position.x += cdx;
-            state.position.y += cdy;
-            state.velocity = (cdx / speed, cdy / speed);
-            total_displacement += (cdx * cdx + cdy * cdy).sqrt();
-        }
-
-        total_displacement / affected.len().max(1) as f64
+        VibePos::new((angle.cos() * radius) as f32, (angle.sin() * radius) as f32)
     }
 }

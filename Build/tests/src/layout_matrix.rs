@@ -10,10 +10,11 @@ fn simple_graph() -> (LayoutEngine, Vec<NoteId>) {
     engine.add_node(a, false);
     engine.add_node(b, false);
     engine.add_node(c, true);
-    engine.update_links(vec![
+    let links = vec![
         Link::new(a, b, LinkKind::Explicit),
         Link::new(b, c, LinkKind::Implicit),
-    ]);
+    ];
+    engine.update_links(links);
     (engine, vec![a, b, c])
 }
 
@@ -60,37 +61,33 @@ fn converges_eventually() {
 }
 
 #[test]
-fn step_neighborhood_moves_only_affected_nodes() {
+fn step_moves_unpinned_nodes() {
     let (mut engine, ids) = simple_graph();
-    // ids[2] is pinned. Its neighbor is ids[1] via the implicit link.
-    // step_neighborhood should move ids[0] (not affected), move ids[1]
-    // (affected, not pinned), and not move ids[2] (affected, pinned).
-    let center = ids[2];
+    // ids[2] is pinned, ids[0] and ids[1] are unpinned.
     let pos_a_before = engine.get_position(&ids[0]).unwrap();
     let pos_b_before = engine.get_position(&ids[1]).unwrap();
     let pos_c_before = engine.get_position(&ids[2]).unwrap();
 
-    let d = engine.step_neighborhood(&center);
+    let d = engine.step();
 
     assert!(d.is_finite(), "displacement should be finite: {}", d);
     assert!(d > 0.0, "should have moved at least one node");
-    // Non-neighbor should NOT move
-    assert_eq!(
+    // Unpinned nodes SHOULD move
+    assert_ne!(
         engine.get_position(&ids[0]).unwrap(),
         pos_a_before,
-        "non-neighbor node should not move"
+        "unpinned node should move"
     );
-    // Pinned neighbor should NOT move
+    assert_ne!(
+        engine.get_position(&ids[1]).unwrap(),
+        pos_b_before,
+        "unpinned node should move"
+    );
+    // Pinned node should NOT move
     assert_eq!(
         engine.get_position(&ids[2]).unwrap(),
         pos_c_before,
         "pinned node should not move"
-    );
-    // Unpinned neighbor SHOULD move
-    assert_ne!(
-        engine.get_position(&ids[1]).unwrap(),
-        pos_b_before,
-        "unpinned neighbor should move"
     );
 }
 
