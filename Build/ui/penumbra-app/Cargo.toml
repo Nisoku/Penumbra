@@ -1,0 +1,35 @@
+[package]
+name = "penumbra-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dioxus = { version = "0.7", default-features = false }
+dioxus-desktop = "0.7.6"
+dioxus-motion = { version = "0.3", default-features = false, features = ["desktop"] }
+penumbra-core = { path = "../../crates/penumbra-core" }
+penumbra-events = { path = "../../crates/penumbra-events" }
+penumbra-graph = { path = "../../crates/penumbra-graph" }
+penumbra-layout = { path = "../../crates/penumbra-layout" }
+penumbra-thread = { path = "../../crates/penumbra-thread" }
+penumbra-theme = { path = "../../crates/penumbra-theme" }
+penumbra-canvas = { path = "../../crates/penumbra-canvas" }
+penumbra-storage = { path = "../../crates/penumbra-storage" }
+penumbra-search = { path = "../../crates/penumbra-search" }
+penumbra-auto-link = { path = "../../crates/penumbra-auto-link" }
+penumbra-markdown = { path = "../../crates/penumbra-markdown" }
+penumbra-embed = { path = "../../crates/penumbra-embed" }
+penumbra-index = { path = "../../crates/penumbra-index" }
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+dioxus-icons = { version = "0.1.0", default-features = false }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", version = "0.0.1", default-features = false }
+dioxus-i18n = "0.5"
+unic-langid = "0.9"
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "CanvasRenderingContext2d"] }

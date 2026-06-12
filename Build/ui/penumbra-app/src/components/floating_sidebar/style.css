@@ -1,0 +1,56 @@
+.dx-floating-sidebar {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(15, 30, 60, 0.85);
+    border: 0.5px solid rgba(99, 148, 220, 0.2);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0;
+    gap: 6px;
+    width: 38px;
+    transition: border-color 200ms ease;
+}
+
+.dx-floating-sidebar:hover {
+    border-color: rgba(99, 148, 220, 0.35);
+}
+
+.dx-floating-sidebar-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #4a80c0;
+    font-size: 15px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    transition: background 150ms ease, color 150ms ease;
+}
+
+.dx-floating-sidebar-btn:hover {
+    background: rgba(99, 148, 220, 0.12);
+    color: #7abaff;
+}
+
+.dx-floating-sidebar-btn[data-active="true"] {
+    background: rgba(99, 148, 220, 0.18);
+    color: #7abaff;
+}
+
+.dx-floating-sidebar-divider {
+    width: 18px;
+    height: 0.5px;
+    background: rgba(99, 148, 220, 0.2);
+    margin: 2px 0;
+}
+
+.dx-floating-sidebar-btn[data-spacer="true"] {
+    margin-top: auto;
+}

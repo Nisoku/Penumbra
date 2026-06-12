@@ -54,6 +54,12 @@ impl std::ops::Mul<f64> for Position {
     }
 }
 
+impl Default for Position {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0 }
+    }
+}
+
 impl From<(f64, f64)> for Position {
     fn from((x, y): (f64, f64)) -> Self {
         Self { x, y }

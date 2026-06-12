@@ -1,0 +1,28 @@
+.dx-fab {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    background: #1a5fc8;
+    border-radius: 999px;
+    padding: 9px 18px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #c8e3ff;
+    border: none;
+    cursor: pointer;
+    transition: background 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+}
+
+.dx-fab:hover {
+    background: #1f6fe0;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(26, 95, 200, 0.35);
+}
+
+.dx-fab:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 8px rgba(26, 95, 200, 0.25);
+}

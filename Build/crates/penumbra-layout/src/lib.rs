@@ -420,14 +420,12 @@ impl LayoutEngine {
     }
 
     fn random_position() -> VibePos {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-        let seed = nanos as f64;
-        let angle = seed * std::f64::consts::TAU / 1_000_000_000.0;
-        let radius = 50.0 + (seed % 200.0);
+        use std::sync::atomic::AtomicU64;
+        use std::sync::atomic::Ordering::Relaxed;
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seed = COUNTER.fetch_add(6364136223846793005, Relaxed);
+        let angle = (seed % 1_000_000_000) as f64 * std::f64::consts::TAU / 1_000_000_000.0;
+        let radius = 50.0 + (seed % 200_000) as f64 / 1000.0;
         VibePos::new((angle.cos() * radius) as f32, (angle.sin() * radius) as f32)
     }
 }

@@ -201,12 +201,10 @@ fn worker_push_returns_snapshot() {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/sync/push"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "accepted": 2,
-                    "snapshotId": "snap-1"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accepted": 2,
+                "snapshotId": "snap-1"
+            })))
             .mount(&mock)
             .await;
 
@@ -228,12 +226,10 @@ fn worker_push_forwards_snapshot_id() {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/sync/push"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "accepted": 1,
-                    "snapshotId": "snap-2"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accepted": 1,
+                "snapshotId": "snap-2"
+            })))
             .mount(&mock)
             .await;
 
@@ -330,13 +326,11 @@ fn worker_pull_sends_since_query_param() {
         Mock::given(method("POST"))
             .and(path("/sync/pull"))
             .and(query_param("since", "snap-prev"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "notes": {},
-                    "embeddings": {},
-                    "positions": {}
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "notes": {},
+                "embeddings": {},
+                "positions": {}
+            })))
             .mount(&mock)
             .await;
 
@@ -378,12 +372,10 @@ fn worker_last_sync_updated_after_push() {
         let mock = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/sync/push"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "accepted": 0,
-                    "snapshotId": "s"
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "accepted": 0,
+                "snapshotId": "s"
+            })))
             .mount(&mock)
             .await;
 
