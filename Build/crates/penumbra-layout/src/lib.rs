@@ -31,17 +31,17 @@ impl Default for LayoutConfig {
     fn default() -> Self {
         Self {
             dt: 0.016,
-            damping: 0.9,
-            repulsion: 1000.0,
-            attraction: 0.01,
+            damping: 0.85,
+            repulsion: 8000.0,
+            attraction: 0.004,
             theta: 0.8,
-            gravity: 0.1,
-            ideal_length: 50.0,
-            max_iterations: 200,
-            convergence_threshold: 0.1,
-            collision_margin: 10.0,
-            max_collision_push: 20.0,
-            collision_passes: 5,
+            gravity: 0.05,
+            ideal_length: 220.0,
+            max_iterations: 300,
+            convergence_threshold: 0.05,
+            collision_margin: 32.0,
+            max_collision_push: 40.0,
+            collision_passes: 6,
         }
     }
 }

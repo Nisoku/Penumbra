@@ -165,6 +165,8 @@ impl AppState {
 
         self.storage.save_note(&note).await?;
 
+        let _links = self.auto_link.process_note(&note).await?;
+
         self.event_bus
             .publish(Event::NoteUpdated { id: *id, note })
             .await;
@@ -235,6 +237,35 @@ impl AppState {
         });
 
         Ok(link)
+    }
+
+    /// Whether an explicit-or-implicit link already exists between two notes.
+    pub fn are_linked(&self, a: &NoteId, b: &NoteId) -> bool {
+        let Ok(g) = self.graph.lock() else {
+            return false;
+        };
+        g.all_links()
+            .into_iter()
+            .any(|l| (&l.source == a && &l.target == b) || (&l.source == b && &l.target == a))
+    }
+
+    /// Create an explicit link between two notes and persist the graph.
+    ///
+    /// Idempotent-ish: if the link already exists the underlying call errors,
+    /// which we swallow so the UI can call this freely.
+    pub async fn link_and_save(&self, source: &NoteId, target: &NoteId) -> Result<()> {
+        if source == target {
+            return Ok(());
+        }
+        // Ignore "already exists", treat as success.
+        let _ = self.link_notes(source, target, LinkKind::Explicit);
+        self.save_graph().await
+    }
+
+    /// Remove a link between two notes and persist the graph.
+    pub async fn unlink_and_save(&self, source: &NoteId, target: &NoteId) -> Result<()> {
+        let _ = self.unlink_notes(source, target);
+        self.save_graph().await
     }
 
     pub async fn search(&self, query: &str, tags: &[String]) -> Result<Vec<SearchResult>> {

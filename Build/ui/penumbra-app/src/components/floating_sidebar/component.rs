@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{LayoutGrid, Pin, Search, Settings, Tag};
+use dioxus_icons::lucide::{LayoutGrid, Pin, Search, Settings, SquarePen, Tag};
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::merge_attributes;
 
@@ -23,11 +23,30 @@ enum SidebarTab {
     Settings,
 }
 
+fn title_or_untitled(title: &str) -> &str {
+    if title.trim().is_empty() { "Untitled" } else { title.trim() }
+}
+
+fn strip_html(s: &str) -> String {
+    let mut r = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => r.push(c),
+            _ => {}
+        }
+    }
+    r
+}
+
 #[component]
 pub fn FloatingSidebar(
     app_state: Signal<Option<Arc<AppState>>>,
     on_note_selected: EventHandler<NoteId>,
     on_tag_filter: EventHandler<Option<String>>,
+    on_open_editor: EventHandler<NoteId>,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
 ) -> Element {
     let mut active = use_signal(|| SidebarTab::Grid);
@@ -43,12 +62,14 @@ pub fn FloatingSidebar(
                 class: Styles::dx_floating_sidebar_btn,
                 "data-active": if active() == SidebarTab::Grid { "true" } else { "false" },
                 onclick: move |_| active.set(SidebarTab::Grid),
+                title: "All notes",
                 LayoutGrid { size: 15, stroke: "currentColor" }
             }
             button {
                 class: Styles::dx_floating_sidebar_btn,
                 "data-active": if active() == SidebarTab::Search { "true" } else { "false" },
                 onclick: move |_| active.set(SidebarTab::Search),
+                title: "Search",
                 Search { size: 15, stroke: "currentColor" }
             }
             div { class: Styles::dx_floating_sidebar_divider }
@@ -56,12 +77,14 @@ pub fn FloatingSidebar(
                 class: Styles::dx_floating_sidebar_btn,
                 "data-active": if active() == SidebarTab::Pin { "true" } else { "false" },
                 onclick: move |_| active.set(SidebarTab::Pin),
+                title: "Pinned notes",
                 Pin { size: 15, stroke: "currentColor" }
             }
             button {
                 class: Styles::dx_floating_sidebar_btn,
                 "data-active": if active() == SidebarTab::Tag { "true" } else { "false" },
                 onclick: move |_| active.set(SidebarTab::Tag),
+                title: "Tags",
                 Tag { size: 15, stroke: "currentColor" }
             }
             div { class: Styles::dx_floating_sidebar_divider }
@@ -70,31 +93,142 @@ pub fn FloatingSidebar(
                 "data-spacer": "true",
                 "data-active": if active() == SidebarTab::Settings { "true" } else { "false" },
                 onclick: move |_| active.set(SidebarTab::Settings),
+                title: "Settings",
                 Settings { size: 15, stroke: "currentColor" }
             }
         }
-        if active() != SidebarTab::Grid {
-            div { class: Styles::dx_sidebar_panel,
-                match active() {
-                    SidebarTab::Search => rsx! {
-                        SearchPanel { app_state, on_note_selected }
-                    },
-                    SidebarTab::Tag => rsx! {
-                        TagPanel { app_state, on_note_selected, on_tag_filter }
-                    },
-                    SidebarTab::Pin => rsx! {
-                        PinPanel { app_state, on_note_selected }
-                    },
-                    SidebarTab::Settings => rsx! {
-                        SettingsPanel { app_state }
-                    },
-                    _ => rsx! {},
+        div { class: Styles::dx_sidebar_panel,
+            match active() {
+                SidebarTab::Grid => rsx! {
+                    GridPanel { app_state, on_note_selected, on_open_editor }
+                },
+                SidebarTab::Search => rsx! {
+                    SearchPanel { app_state, on_note_selected }
+                },
+                SidebarTab::Tag => rsx! {
+                    TagPanel { app_state, on_note_selected, on_tag_filter }
+                },
+                SidebarTab::Pin => rsx! {
+                    PinPanel { app_state, on_note_selected }
+                },
+                SidebarTab::Settings => rsx! {
+                    SettingsPanel { app_state }
+                },
+            }
+        }
+    }
+}
+
+// Grid Panel: list of all notes
+#[component]
+fn GridPanel(
+    app_state: Signal<Option<Arc<AppState>>>,
+    on_note_selected: EventHandler<NoteId>,
+    on_open_editor: EventHandler<NoteId>,
+) -> Element {
+    let mut filter = use_signal(String::new);
+    let mut sort_by = use_signal(|| "updated");
+
+    let mut notes: Vec<Note> = if let Some(s) = app_state.read().as_ref() {
+        s.all_notes().unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let ft = filter();
+    if !ft.trim().is_empty() {
+        let q = ft.to_lowercase();
+        notes.retain(|n| {
+            n.title.to_lowercase().contains(&q)
+                || strip_html(&n.body).to_lowercase().contains(&q)
+                || n.tags.iter().any(|t| t.to_lowercase().contains(&q))
+        });
+    }
+
+    match sort_by().as_ref() {
+        "title" => notes.sort_by(|a, b| a.title.cmp(&b.title)),
+        "created" => notes.sort_by(|a, b| b.meta.created_at.cmp(&a.meta.created_at)),
+        _ => notes.sort_by(|a, b| b.meta.updated_at.cmp(&a.meta.updated_at)),
+    }
+
+    let count = notes.len();
+
+    rsx! {
+        div { class: Styles::dx_sidebar_panel_inner,
+            div { class: Styles::dx_panel_header,
+                "All Notes"
+                span { class: Styles::dx_note_count, " {count}" }
+            }
+            input {
+                class: Styles::dx_search_input,
+                placeholder: "Filter notes...",
+                value: "{filter}",
+                oninput: move |e| filter.set(e.value()),
+            }
+            div { class: Styles::dx_sort_row,
+                button {
+                    class: Styles::dx_sort_btn,
+                    "data-active": if sort_by() == "updated" { "true" } else { "false" },
+                    onclick: move |_| sort_by.set("updated"),
+                    "Recent"
+                }
+                button {
+                    class: Styles::dx_sort_btn,
+                    "data-active": if sort_by() == "title" { "true" } else { "false" },
+                    onclick: move |_| sort_by.set("title"),
+                    "A–Z"
+                }
+                button {
+                    class: Styles::dx_sort_btn,
+                    "data-active": if sort_by() == "created" { "true" } else { "false" },
+                    onclick: move |_| sort_by.set("created"),
+                    "Created"
+                }
+            }
+            div { class: Styles::dx_note_list,
+                if notes.is_empty() {
+                    div { class: Styles::dx_search_empty, "No notes yet" }
+                }
+                for note in notes {
+                    div { class: Styles::dx_note_list_item,
+                        div {
+                            class: Styles::dx_note_list_info,
+                            onclick: move |_| on_note_selected.call(note.id),
+                            div { class: Styles::dx_search_result_title,
+                                { title_or_untitled(&note.title) }
+                            }
+                            {
+                                let preview = {
+                                    let plain = strip_html(&note.body);
+                                    let s: String = plain.chars().take(72).collect();
+                                    if plain.len() > 72 { format!("{s}…") } else { s }
+                                };
+                                rsx! {
+                                    div { class: Styles::dx_search_result_preview, "{preview}" }
+                                }
+                            }
+                            if !note.tags.is_empty() {
+                                div { class: Styles::dx_note_tags_row,
+                                    for tag in &note.tags {
+                                        span { class: Styles::dx_note_tag_chip, "{tag}" }
+                                    }
+                                }
+                            }
+                        }
+                        button {
+                            class: Styles::dx_note_edit_btn,
+                            title: "Open in editor",
+                            onclick: move |_| on_open_editor.call(note.id),
+                            SquarePen { size: 14, stroke: "currentColor" }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+// Search Panel
 #[component]
 fn SearchPanel(
     app_state: Signal<Option<Arc<AppState>>>,
@@ -142,10 +276,15 @@ fn SearchPanel(
                         class: Styles::dx_search_result,
                         onclick: move |_| on_note_selected.call(r.note_id),
                         div { class: Styles::dx_search_result_title,
-                            {r.note.title}
+                            { title_or_untitled(&r.note.title) }
                         }
-                        div { class: Styles::dx_search_result_preview,
-                            {if r.note.body.len() > 80 { &r.note.body[..80] } else { &r.note.body }}
+                        {
+                            let preview = {
+                                let plain = strip_html(&r.note.body);
+                                let s: String = plain.chars().take(80).collect();
+                                if plain.len() > 80 { format!("{s}…") } else { s }
+                            };
+                            rsx! { div { class: Styles::dx_search_result_preview, "{preview}" } }
                         }
                         div { class: Styles::dx_search_result_meta,
                             span { "Score: {r.score:.2}" }
@@ -160,6 +299,7 @@ fn SearchPanel(
     }
 }
 
+// Tag Panel
 #[component]
 fn TagPanel(
     app_state: Signal<Option<Arc<AppState>>>,
@@ -187,11 +327,12 @@ fn TagPanel(
         let tag = selected_tag();
         if let Some(t) = tag {
             if let Some(s) = app_state.read().as_ref() {
-                    let filtered: Vec<Note> = s.all_notes()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|n| n.tags.contains(&t))
-                        .collect();
+                let filtered: Vec<Note> = s
+                    .all_notes()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|n| n.tags.contains(&t))
+                    .collect();
                 tagged_notes.set(filtered);
             }
         } else {
@@ -242,7 +383,9 @@ fn TagPanel(
                         div {
                             class: Styles::dx_tag_note_item,
                             onclick: move |_| on_note_selected.call(note.id),
-                            div { class: Styles::dx_search_result_title, "{note.title}" }
+                            div { class: Styles::dx_search_result_title,
+                                { title_or_untitled(&note.title) }
+                            }
                         }
                     }
                 }
@@ -251,6 +394,7 @@ fn TagPanel(
     }
 }
 
+// Pin Panel
 #[component]
 fn PinPanel(
     app_state: Signal<Option<Arc<AppState>>>,
@@ -275,27 +419,74 @@ fn PinPanel(
                 div {
                     class: Styles::dx_search_result,
                     onclick: move |_| on_note_selected.call(note.id),
-                    div { class: Styles::dx_search_result_title, "{note.title}" }
+                    div { class: Styles::dx_search_result_title,
+                        { title_or_untitled(&note.title) }
+                    }
                 }
             }
         }
     }
 }
 
+// Settings Panel
 #[component]
-fn SettingsPanel(
-    app_state: Signal<Option<Arc<AppState>>>,
-) -> Element {
+fn SettingsPanel(app_state: Signal<Option<Arc<AppState>>>) -> Element {
+    let mut theme_mode = use_context::<Signal<String>>();
+
+    let mut note_count = use_signal(|| 0usize);
+    let mut link_count = use_signal(|| 0usize);
+    let mut tag_count = use_signal(|| 0usize);
+
+    let _ = use_effect(move || {
+        if let Some(s) = app_state.read().as_ref() {
+            if let Ok(notes) = s.all_notes() {
+                let lc = s.all_links().map(|l| l.len()).unwrap_or(0);
+                let tags: std::collections::HashSet<_> =
+                    notes.iter().flat_map(|n| n.tags.iter().cloned()).collect();
+                note_count.set(notes.len());
+                link_count.set(lc);
+                tag_count.set(tags.len());
+            }
+        }
+    });
+
     rsx! {
         div { class: Styles::dx_sidebar_panel_inner,
             div { class: Styles::dx_panel_header, "Settings" }
+
+            div { class: Styles::dx_settings_section_label, "Theme" }
+            div { class: Styles::dx_theme_toggle,
+                button {
+                    class: Styles::dx_theme_btn,
+                    "data-active": if theme_mode() == "dark" { "true" } else { "false" },
+                    onclick: move |_| theme_mode.set("dark".into()),
+                    "Dark"
+                }
+                button {
+                    class: Styles::dx_theme_btn,
+                    "data-active": if theme_mode() == "light" { "true" } else { "false" },
+                    onclick: move |_| theme_mode.set("light".into()),
+                    "Light"
+                }
+            }
+
+            div { class: Styles::dx_settings_section_label, "Stats" }
             div { class: Styles::dx_settings_row,
-                span { "Notes: " }
-                span { "{app_state.read().as_ref().map(|s| s.all_notes().unwrap_or_default().len()).unwrap_or(0)}" }
+                span { "Notes" }
+                span { "{note_count}" }
             }
             div { class: Styles::dx_settings_row,
-                span { "Links: " }
-                span { "{app_state.read().as_ref().map(|s| s.all_links().unwrap_or_default().len()).unwrap_or(0)}" }
+                span { "Links" }
+                span { "{link_count}" }
+            }
+            div { class: Styles::dx_settings_row,
+                span { "Unique tags" }
+                span { "{tag_count}" }
+            }
+
+            div { class: Styles::dx_settings_section_label, "About" }
+            div { class: Styles::dx_settings_about,
+                "Penumbra: spatial notes"
             }
         }
     }

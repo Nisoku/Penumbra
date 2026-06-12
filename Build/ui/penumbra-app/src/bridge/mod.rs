@@ -91,10 +91,12 @@ pub fn start_layout_worker(
     graph: Arc<std::sync::Mutex<GraphStore>>,
     event_bus: Arc<EventBus>,
 ) -> Worker {
+    use std::collections::HashSet;
     let rx = event_bus.subscribe();
     spawn_worker("layout-worker", move |w| {
         let mut links_cache: Vec<Link> = Vec::new();
-        let mut node_ids: Vec<NoteId> = Vec::new();
+        // Use a HashSet for O(1) membership checks.
+        let mut live_ids: HashSet<NoteId> = HashSet::new();
 
         while !w.is_cancelled() {
             // Drain pending control events (non-blocking).
@@ -116,29 +118,34 @@ pub fn start_layout_worker(
                 Err(_) => break,
             };
 
-            // Sync links
+            // Sync links only when they've changed.
             if current_links != links_cache {
                 engine.update_links(current_links.clone());
                 links_cache = current_links;
             }
 
-            // Add new nodes that appeared since last cycle
+            let current_set: HashSet<NoteId> = current_notes.iter().map(|n| n.id).collect();
+
+            // Add new nodes.
             for note in &current_notes {
-                if !node_ids.contains(&note.id) {
+                if live_ids.insert(note.id) {
                     engine.add_node(note.id, note.meta.pinned);
-                    node_ids.push(note.id);
                 }
             }
 
-            // Remove nodes that have been deleted
-            let current_ids: Vec<NoteId> = current_notes.iter().map(|n| n.id).collect();
-            node_ids.retain(|id| current_ids.contains(id));
+            // Remove deleted nodes
+            let removed: Vec<NoteId> = live_ids.difference(&current_set).copied().collect();
+            for id in removed {
+                live_ids.remove(&id);
+                engine.remove_node(&id);
+            }
 
             let displacement = engine.step();
 
             let positions = engine.all_positions();
             event_bus.try_publish(Event::LayoutChanged { positions });
 
+            // Back off when the layout has stabilised.
             let step_ms = if displacement < 0.01 && engine.iteration_count() > 10 {
                 LAYOUT_INTERVAL_MS * 4
             } else {

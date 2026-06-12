@@ -3,7 +3,7 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: var(--primary-color-1);
+  background: var(--bg);
   z-index: 500;
   animation: dx-editor-enter 200ms ease-out;
 }
@@ -18,7 +18,7 @@
   align-items: center;
   height: 48px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--primary-color-6);
+  border-bottom: 1px solid var(--border);
   gap: 12px;
   flex-shrink: 0;
 }
@@ -31,7 +31,7 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--secondary-color-4);
+  color: var(--text);
   cursor: pointer;
   font-size: 0.875rem;
   font-family: inherit;
@@ -39,13 +39,13 @@
 }
 
 .dx-editor-back:hover {
-  background: var(--primary-color-5);
+  background: var(--accent-soft);
 }
 
 .dx-editor-status {
   margin-left: auto;
   font-size: 0.75rem;
-  color: var(--secondary-color-5);
+  color: var(--text-dim);
 }
 
 .dx-editor-content {
@@ -70,7 +70,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   background: transparent;
-  color: var(--secondary-color-2);
+  color: var(--text);
   font-size: 2rem;
   font-weight: 700;
   font-family: inherit;
@@ -80,11 +80,11 @@
 }
 
 .dx-editor-title:focus {
-  border-bottom-color: var(--secondary-color-5);
+  border-bottom-color: var(--text-dim);
 }
 
 .dx-editor-title::placeholder {
-  color: var(--secondary-color-6);
+  color: var(--text-faint);
 }
 
 .dx-editor-body {
@@ -92,7 +92,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--secondary-color-4);
+  color: var(--text);
   font-family: "SF Mono", Monaco, "Cascadia Code", "Fira Code", monospace;
   font-size: 0.9375rem;
   line-height: 1.7;
@@ -103,32 +103,202 @@
 }
 
 .dx-editor-body::placeholder {
-  color: var(--secondary-color-6);
+  color: var(--text-faint);
 }
 
 .dx-editor-tags {
   padding: 8px 0;
   border: none;
-  border-top: 1px solid var(--primary-color-6);
+  border-top: 1px solid var(--border);
   background: transparent;
-  color: var(--secondary-color-5);
+  color: var(--text-dim);
   font-size: 0.8125rem;
   font-family: inherit;
   outline: none;
 }
 
 .dx-editor-tags:focus {
-  color: var(--secondary-color-4);
+  color: var(--text);
 }
 
 .dx-editor-tags::placeholder {
-  color: var(--secondary-color-6);
+  color: var(--text-faint);
 }
 
 .dx-editor-error {
   padding: 8px 12px;
   border-radius: 6px;
-  background: color-mix(in oklab, var(--primary-error-color) 15%, transparent);
-  color: var(--primary-error-color);
+  background: color-mix(in oklab, var(--danger) 15%, transparent);
+  color: var(--danger);
   font-size: 0.8125rem;
+}
+
+.dx-editor-btn-delete {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border: 1px solid var(--danger-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: inherit;
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+
+.dx-editor-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  padding-top: 2px;
+}
+
+.dx-editor-btn-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.dx-editor-delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+.dx-editor-btn-confirm-yes {
+  padding: 3px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 5px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: inherit;
+  transition: background 120ms;
+}
+
+.dx-editor-btn-confirm-yes:hover {
+  background: var(--danger-soft);
+  filter: brightness(1.15);
+}
+
+.dx-editor-btn-confirm-cancel {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-family: inherit;
+  transition: background 120ms;
+}
+
+.dx-editor-btn-confirm-cancel:hover {
+  background: var(--accent-soft);
+}
+
+#penumbra-editor {
+  width: 100%;
+  min-height: 300px;
+}
+
+#penumbra-editor :global(.ProseMirror) {
+  outline: none;
+  min-height: 300px;
+  padding: 0;
+  color: var(--text);
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+#penumbra-editor :global(.ProseMirror p) {
+  margin: 0.5em 0;
+}
+
+#penumbra-editor :global(.ProseMirror h1) {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 1em 0 0.5em;
+  line-height: 1.3;
+}
+
+#penumbra-editor :global(.ProseMirror h2) {
+  font-size: 1.375rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0.8em 0 0.4em;
+  line-height: 1.35;
+}
+
+#penumbra-editor :global(.ProseMirror h3) {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0.6em 0 0.3em;
+  line-height: 1.4;
+}
+
+#penumbra-editor :global(.ProseMirror ul),
+#penumbra-editor :global(.ProseMirror ol) {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+#penumbra-editor :global(.ProseMirror li) {
+  margin: 0.25em 0;
+}
+
+#penumbra-editor :global(.ProseMirror blockquote) {
+  border-left: 3px solid var(--text-dim);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--text-dim);
+}
+
+#penumbra-editor :global(.ProseMirror pre) {
+  background: var(--accent-soft);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+#penumbra-editor :global(.ProseMirror code) {
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-family: "SF Mono", Monaco, "Cascadia Code", "Fira Code", monospace;
+  font-size: 0.8125rem;
+}
+
+#penumbra-editor :global(.ProseMirror pre code) {
+  background: none;
+  padding: 0;
+}
+
+#penumbra-editor :global(.ProseMirror hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+#penumbra-editor :global(.ProseMirror p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--text-faint);
+  pointer-events: none;
+  height: 0;
 }

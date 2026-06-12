@@ -4,11 +4,15 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 use dioxus::html::geometry::WheelDelta;
 use dioxus_i18n::prelude::*;
+use dioxus_icons::lucide::{Link2, Maximize, Minus, Plus};
 
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
 use penumbra_events as pevents;
+use penumbra_theme::Theme;
 use unic_langid::langid;
+
+use crate::hooks::CameraHandle;
 
 use crate::components::{Fab, FloatingSidebar, GraphCards, NoteEditor, TopBar};
 use crate::hooks::{use_camera, use_canvas, use_init, use_render_state};
@@ -28,6 +32,25 @@ pub fn App() -> Element {
             .with_locale((langid!("en-US"), include_str!("../locales/en-US.ftl")))
     });
 
+    // Theme mode provided as context so nested components can read/write it.
+    let theme_mode: Signal<String> = use_context_provider(|| Signal::new("dark".to_string()));
+
+    // Apply theme CSS vars whenever mode changes.
+    use_effect(move || {
+        let mode = theme_mode();
+        let theme = if mode == "light" {
+            Theme::light()
+        } else {
+            Theme::dark()
+        };
+        let css = theme.css_root_block();
+        _ = document::eval(&format!(
+            "var s=document.getElementById('__pnb_theme');\
+             if(!s){{s=document.createElement('style');s.id='__pnb_theme';\
+             document.head.appendChild(s);}}s.textContent='{css}';"
+        ));
+    });
+
     // Signals
     let app_state: Signal<Option<Arc<AppState>>> = use_signal(|| None);
     let mut positions: Signal<HashMap<NoteId, Position>> = use_signal(HashMap::new);
@@ -38,7 +61,7 @@ pub fn App() -> Element {
     let hovered: Signal<Option<NoteId>> = use_signal(|| None);
     let mut app_mode: Signal<AppMode> = use_signal(|| AppMode::Graph);
 
-    // Note-creation card->zoom->editor transition
+    // Note-creation: canvas card -> drift -> editor
     let mut pending_note: Signal<Option<NoteId>> = use_signal(|| None);
     let mut drift_triggered: Signal<bool> = use_signal(|| false);
 
@@ -57,9 +80,24 @@ pub fn App() -> Element {
     // Tag filter for graph view
     let selected_tag: Signal<Option<String>> = use_signal(|| None);
 
+    // Manual-linking mode: Some(id) means "next clicked note links to id".
+    let mut linking_from: Signal<Option<NoteId>> = use_signal(|| None);
+
+    // How many notes currently exist (drives the empty-state overlay).
+    let note_count = use_memo(move || {
+        let _ = graph_version();
+        app_state
+            .read()
+            .as_ref()
+            .map(|s| s.all_notes().map(|n| n.len()).unwrap_or(0))
+            .unwrap_or(0)
+    });
+
     // Center camera on viewport after init
     use_effect(move || {
-        if !ready() { return };
+        if !ready() {
+            return;
+        }
         let (w, h) = *window_size.read();
         *camera.x.write() = w as f64 / 2.0;
         *camera.y.write() = h as f64 / 2.0;
@@ -113,13 +151,56 @@ pub fn App() -> Element {
         drift_triggered.set(false);
     });
 
-    // Render
+
+    // Reusable "create a new note" action (FAB + Cmd/Ctrl+N).
+    let create_note = move || {
+        if !ready() {
+            tracing::warn!("not ready yet");
+            return;
+        }
+        let app_state = app_state;
+        let mut pending_note = pending_note;
+        spawn(async move {
+            let state = (*app_state.read()).clone();
+            match state {
+                Some(s) => match s.add_note(String::new(), String::new()).await {
+                    Ok(note) => {
+                        tracing::info!("created note {}", note.id);
+                        pending_note.set(Some(note.id));
+                    }
+                    Err(e) => tracing::error!("add_note: {e}"),
+                },
+                None => tracing::error!("app_state is None even though ready"),
+            }
+        });
+    };
+
     let mode = *app_mode.read();
     match mode {
         AppMode::Graph => rsx! {
             div {
-                style: "width: 100vw; height: 100vh; background: #0a0f1e; position: relative; overflow: hidden;",
-                // Drag/move/up on root so they fire over all children (canvas, cards, etc.)
+                tabindex: "0",
+                class: "pnb-themed",
+                style: "width: 100vw; height: 100vh; background: var(--bg); position: relative; overflow: hidden; outline: none;",
+                onmounted: move |evt: Event<MountedData>| {
+                    // Focus the root so keyboard shortcuts are captured.
+                    spawn(async move { let _ = evt.data().set_focus(true).await; });
+                },
+                onkeydown: move |evt: Event<KeyboardData>| {
+                    let mods = evt.modifiers();
+                    match evt.key() {
+                        Key::Escape => {
+                            if linking_from().is_some() {
+                                linking_from.set(None);
+                            }
+                        }
+                        Key::Character(c) if c == "n" && (mods.meta() || mods.ctrl()) => {
+                            evt.prevent_default();
+                            create_note();
+                        }
+                        _ => {}
+                    }
+                },
                 onmousemove: move |evt: Event<MouseData>| {
                     let coords = evt.data.client_coordinates();
                     if let Some(note_id) = *dragging_note.read() {
@@ -129,7 +210,6 @@ pub fn App() -> Element {
                         let wy = (coords.y - *camera.y.read()) / zoom - oy;
                         let pos = Position::new(wx, wy);
                         positions.write().insert(note_id, pos);
-                        // Keep layout engine in sync so other notes don't jitter
                         if let Some(ref s) = *app_state.read() {
                             s.event_bus.try_publish(
                                 pevents::Event::SetNodePosition { id: note_id, position: pos },
@@ -137,7 +217,9 @@ pub fn App() -> Element {
                         }
                         return;
                     }
-                    if !is_panning() { return };
+                    if !is_panning() {
+                        return;
+                    }
                     let (sx, sy) = pan_start();
                     let dx = coords.x - sx;
                     let dy = coords.y - sy;
@@ -172,38 +254,37 @@ pub fn App() -> Element {
                     }
                     dragging_note.set(None);
                 },
+                onmousedown: move |evt: Event<MouseData>| {
+                    if dragging_note().is_some() {
+                        return;
+                    }
+                    if is_panning() {
+                        return;
+                    }
+                    let coords = evt.data.client_coordinates();
+                    is_panning.set(true);
+                    pan_start.set((coords.x, coords.y));
+                },
+                onwheel: move |evt: Event<WheelData>| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                    let delta = evt.data.delta();
+                    let dz = match delta {
+                        WheelDelta::Pixels(v) => v.z,
+                        WheelDelta::Lines(v) => v.z * 10.0,
+                        WheelDelta::Pages(v) => v.z * 100.0,
+                    };
+                    if dz == 0.0 {
+                        return;
+                    }
+                    let coords = evt.data.client_coordinates();
+                    camera.zoom_at(dz * -0.001, coords.x, coords.y);
+                },
 
-                // Dot-grid background (CSS, decorative)
-                div {
-                    style: "position: absolute; inset: 0; \
-                        background-image: radial-gradient(circle, rgba(99, 148, 220, 0.18) 1px, transparent 1px); \
-                        background-size: 28px 28px; \
-                        pointer-events: none;",
-                }
-
-                // Graph canvas
+                // Graph canvas (just a drawing surface as events handled by root div)
                 canvas {
                     id: "penumbra-graph",
                     style: "position: absolute; inset: 0; width: 100%; height: 100%;",
-                    onmousedown: move |evt: Event<MouseData>| {
-                        if dragging_note().is_some() { return };
-                        let coords = evt.data.client_coordinates();
-                        is_panning.set(true);
-                        pan_start.set((coords.x, coords.y));
-                    },
-                    onwheel: move |evt: Event<WheelData>| {
-                        evt.prevent_default();
-                        evt.stop_propagation();
-                        let delta = evt.data.delta();
-                        let dz = match delta {
-                            WheelDelta::Pixels(v) => v.z,
-                            WheelDelta::Lines(v) => v.z * 10.0,
-                            WheelDelta::Pages(v) => v.z * 100.0,
-                        };
-                        if dz == 0.0 { return };
-                        let coords = evt.data.client_coordinates();
-                        camera.zoom_at(dz * -0.001, coords.x, coords.y);
-                    },
                 }
 
                 GraphCards {
@@ -214,6 +295,9 @@ pub fn App() -> Element {
                     drag_offset,
                     dragged_set,
                     filter_tag: selected_tag(),
+                    linking_from,
+                    selected,
+                    hovered,
                     on_open_editor: {
                         let mut mode = app_mode;
                         move |note_id| {
@@ -236,29 +320,54 @@ pub fn App() -> Element {
                         let mut tag = selected_tag;
                         move |t| tag.set(t)
                     },
+                    on_open_editor: {
+                        let mut mode = app_mode;
+                        move |note_id| {
+                            mode.set(AppMode::Editor { note_id: Some(note_id) });
+                        }
+                    },
                 }
                 Fab {
-                    onclick: move |_| {
-                        if !ready() {
-                            tracing::warn!("not ready yet");
-                            return;
+                    onclick: move |_| create_note(),
+                }
+
+                // Zoom / view controls (bottom-left).
+                ZoomControls { camera, positions, window_size }
+
+                // Linking banner.
+                if linking_from().is_some() {
+                    div {
+                        style: "position: absolute; top: 64px; left: 50%; transform: translateX(-50%); \
+                                 display: flex; align-items: center; gap: 10px; \
+                                 background: rgba(255,185,100,0.14); border: 1px solid rgba(255,185,100,0.4); \
+                                 color: #ffce8a; padding: 8px 14px; border-radius: 999px; font-size: 13px; \
+                                 backdrop-filter: blur(8px); z-index: 600;",
+                        Link2 { size: 14, stroke: "currentColor" }
+                        span { "Click another note to link  ·  Esc to cancel" }
+                        button {
+                            style: "background: rgba(255,185,100,0.2); border: none; color: #ffce8a; \
+                                     border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px;",
+                            onclick: move |_| linking_from.set(None),
+                            "Cancel"
                         }
-                        let app_state = app_state;
-                        let mut pending_note = pending_note;
-                        spawn(async move {
-                            let state = (*app_state.read()).clone();
-                            match state {
-                                Some(s) => match s.add_note(String::new(), String::new()).await {
-                                    Ok(note) => {
-                                        tracing::info!("created note {}", note.id);
-                                        pending_note.set(Some(note.id));
-                                    }
-                                    Err(e) => tracing::error!("add_note: {e}"),
-                                },
-                                None => tracing::error!("app_state is None even though ready"),
-                            }
-                        });
-                    },
+                    }
+                }
+
+                // Empty state.
+                if note_count() == 0 && ready() {
+                    div {
+                        style: "position: absolute; inset: 0; display: flex; flex-direction: column; \
+                                 align-items: center; justify-content: center; gap: 14px; \
+                                 pointer-events: none; z-index: 50;",
+                        div {
+                            style: "color: var(--text-dim); font-size: 17px; font-weight: 500;",
+                            "Your canvas is empty"
+                        }
+                        div {
+                            style: "color: var(--text-faint); font-size: 13px;",
+                            "Press the + button or ⌘N to create your first note"
+                        }
+                    }
                 }
             }
         },
@@ -272,7 +381,124 @@ pub fn App() -> Element {
                     camera.drift_to(Position::new(w as f64 / 2.0, h as f64 / 2.0));
                     app_mode.set(AppMode::Graph);
                 },
+                on_delete: move |_| {
+                    if let Some(nid) = note_id {
+                        let app = app_state;
+                        spawn(async move {
+                            if let Some(ref s) = *app.read() {
+                                if let Err(e) = s.remove_note(&nid).await {
+                                    tracing::error!("remove_note: {e}");
+                                }
+                            }
+                        });
+                    }
+                    app_mode.set(AppMode::Graph);
+                },
             }
         },
     }
 }
+
+/// Floating zoom / fit-to-view controls (bottom-left of the canvas).
+#[allow(non_snake_case)]
+#[component]
+fn ZoomControls(
+    camera: CameraHandle,
+    positions: Signal<HashMap<NoteId, Position>>,
+    window_size: Signal<(f32, f32)>,
+) -> Element {
+    let mut camera = camera;
+    let zoom = *camera.zoom.read();
+    let pct = (zoom * 100.0).round() as i64;
+
+    let btn = "width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; \
+               background: transparent; border: none; color: #7abaff; cursor: pointer; border-radius: 8px; \
+               transition: background 120ms;";
+
+    rsx! {
+        style { {ZOOM_CSS} }
+        div { class: "pnb-zoom",
+            button {
+                class: "pnb-zoom-btn",
+                style: "{btn}",
+                title: "Zoom in",
+                onclick: move |_| {
+                    let (w, h) = *window_size.read();
+                    camera.zoom_at(0.2, w as f64 / 2.0, h as f64 / 2.0);
+                },
+                Plus { size: 16, stroke: "currentColor" }
+            }
+            div { class: "pnb-zoom-pct", "{pct}%" }
+            button {
+                class: "pnb-zoom-btn",
+                style: "{btn}",
+                title: "Zoom out",
+                onclick: move |_| {
+                    let (w, h) = *window_size.read();
+                    camera.zoom_at(-0.2, w as f64 / 2.0, h as f64 / 2.0);
+                },
+                Minus { size: 16, stroke: "currentColor" }
+            }
+            div { style: "height: 1px; background: rgba(99,148,220,0.15); margin: 2px 6px;" }
+            button {
+                class: "pnb-zoom-btn",
+                style: "{btn}",
+                title: "Fit all notes",
+                onclick: move |_| {
+                    let pos = positions.read();
+                    if pos.is_empty() {
+                        return;
+                    }
+                    let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
+                    let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
+                    for p in pos.values() {
+                        min_x = min_x.min(p.x);
+                        min_y = min_y.min(p.y);
+                        max_x = max_x.max(p.x);
+                        max_y = max_y.max(p.y);
+                    }
+                    let (w, h) = *window_size.read();
+                    let (w, h) = (w as f64, h as f64);
+                    let span_x = (max_x - min_x).max(1.0) + 320.0;
+                    let span_y = (max_y - min_y).max(1.0) + 320.0;
+                    let target_zoom = (w / span_x).min(h / span_y).clamp(0.1, 2.0);
+                    let center = Position::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+                    // Set zoom directly, then center the camera on the bounding box midpoint.
+                    *camera.zoom.write() = target_zoom;
+                    *camera.x.write() = w / 2.0 - center.x * target_zoom;
+                    *camera.y.write() = h / 2.0 - center.y * target_zoom;
+                    camera.cancel_drift();
+                },
+                Maximize { size: 15, stroke: "currentColor" }
+            }
+        }
+    }
+}
+
+const ZOOM_CSS: &str = r#"
+.pnb-zoom {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 5px;
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--border);
+    border-radius: 12px;
+    z-index: 600;
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+.pnb-zoom-btn { color: var(--accent-bright) !important; }
+.pnb-zoom-btn:hover { background: var(--accent-soft) !important; }
+.pnb-zoom-pct {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 1px 0;
+    user-select: none;
+}
+"#;

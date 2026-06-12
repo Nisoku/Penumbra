@@ -105,7 +105,9 @@ async fn layout_event_loop(
 ) {
     let rx = event_bus.subscribe();
     let mut last_save = Instant::now();
+    let mut last_card_update = Instant::now();
     let debounce = std::time::Duration::from_secs(2);
+    let card_throttle = std::time::Duration::from_millis(40); // ~25 fps for card DOM
     loop {
         match rx.recv().await {
             Ok(Event::LayoutChanged { positions: p }) => {
@@ -116,14 +118,21 @@ async fn layout_event_loop(
                 if !dragged_set.read().is_empty() {
                     continue;
                 }
-                let mut merged = p.clone();
-                let dragged = dragged_set.read().clone();
-                for id in &dragged {
-                    if let Some(pos) = positions.read().get(id) {
-                        merged.insert(*id, *pos);
+                // Throttle card-position signal so HTML cards don't re-render
+                // at 60 fps.  The canvas (canvas-draw.js) reads state via a
+                // separate eval path and always gets the latest positions.
+                let now = Instant::now();
+                if now - last_card_update >= card_throttle {
+                    let mut merged = p.clone();
+                    let dragged = dragged_set.read().clone();
+                    for id in &dragged {
+                        if let Some(pos) = positions.read().get(id) {
+                            merged.insert(*id, *pos);
+                        }
                     }
+                    positions.set(merged);
+                    last_card_update = now;
                 }
-                positions.set(merged);
                 if last_save.elapsed() >= debounce {
                     if let Err(e) = state.storage.save_positions(&p).await {
                         tracing::error!("save positions: {e}");

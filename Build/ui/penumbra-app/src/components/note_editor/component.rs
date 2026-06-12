@@ -1,29 +1,62 @@
 use std::sync::Arc;
 
+use dioxus::document::eval;
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{ArrowLeft, Trash2};
 
 use penumbra_core::note::NoteId;
-use penumbra_markdown::parser::markdown_to_html;
 
 use crate::state::AppState;
 
 #[css_module("/src/components/note_editor/style.css")]
 struct Styles;
 
+const TIPTAP_JS: &str = include_str!("../../../js/tiptap-editor.js");
+
+/// Count words in an HTML body by stripping tags first.
+fn word_count(html: &str) -> usize {
+    let mut plain = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => plain.push(c),
+            _ => {}
+        }
+    }
+    plain.split_whitespace().filter(|w| !w.is_empty()).count()
+}
+
+fn is_body_html(body: &str) -> bool {
+    let trimmed = body.trim();
+    trimmed.starts_with('<')
+        && (trimmed.contains("<p>")
+            || trimmed.contains("<h")
+            || trimmed.contains("<ul")
+            || trimmed.contains("<ol")
+            || trimmed.contains("<div")
+            || trimmed.contains("<pre")
+            || trimmed.contains("<blockquote"))
+}
+
 #[component]
 pub fn NoteEditor(
     app_state: Signal<Option<Arc<AppState>>>,
     note_id: Option<NoteId>,
     on_back: EventHandler<MouseEvent>,
+    on_delete: EventHandler<()>,
 ) -> Element {
     let mut title = use_signal(String::new);
     let mut body = use_signal(String::new);
     let mut tags = use_signal(String::new);
-    let show_preview = use_signal(|| false);
     let saving = use_signal(|| false);
     let error = use_signal(|| None::<String>);
+    let mut tiptap_error = use_signal(|| None::<String>);
+    let mut loaded = use_signal(|| false);
+    let mut delete_confirm = use_signal(|| false);
 
-    // Load existing note or start fresh
+    // Load existing note data (synchronous as graph is in memory).
     use_effect(move || {
         if let Some(nid) = note_id {
             if let Some(state) = app_state.read().as_ref() {
@@ -32,20 +65,55 @@ pub fn NoteEditor(
                         title.set(note.title.clone());
                         body.set(note.body.clone());
                         tags.set(note.tags.join(", "));
+                        loaded.set(true);
                         return;
                     }
                 }
             }
         }
-        // New note is already empty from initial signal values
+        loaded.set(true);
     });
 
-    let preview_html = use_memo(move || {
-        let b = body();
-        if b.is_empty() {
-            String::new()
+    // Start TipTap only after note data is ready. The guard `if !is_loaded { return; }`
+    // keeps the first (pre-data) run cheap and prevents double-mounting the editor.
+    let _ = use_resource(move || {
+        let is_loaded = loaded();
+        let initial = if is_loaded {
+            let b = body.read();
+            if is_body_html(&b) {
+                b.clone()
+            } else if !b.is_empty() {
+                penumbra_markdown::parser::markdown_to_html(&b).unwrap_or(b.clone())
+            } else {
+                String::new()
+            }
         } else {
-            markdown_to_html(&b).unwrap_or_else(|_| b.clone())
+            String::new()
+        };
+        async move {
+            if !is_loaded {
+                return;
+            }
+            let mut ev = eval(TIPTAP_JS);
+            if let Err(e) = ev.send(&initial) {
+                tiptap_error.set(Some(format!("eval send failed: {e}")));
+                return;
+            }
+            loop {
+                match ev.recv::<String>().await {
+                    Ok(msg) => {
+                        if msg.starts_with("__ERROR__") {
+                            tiptap_error.set(Some(msg));
+                            break;
+                        }
+                        body.set(msg);
+                    }
+                    Err(e) => {
+                        tiptap_error.set(Some(format!("eval recv failed: {e}")));
+                        break;
+                    }
+                }
+            }
         }
     });
 
@@ -80,9 +148,7 @@ pub fn NoteEditor(
                 match app {
                     Some(state) => {
                         let result = if let Some(nid) = editing {
-                            state
-                                .update_note(&nid, Some(t), Some(b), Some(tag_list))
-                                .await
+                            state.update_note(&nid, Some(t), Some(b), Some(tag_list)).await
                         } else {
                             state.add_note(t, b).await.map(|_| ())
                         };
@@ -103,10 +169,7 @@ pub fn NoteEditor(
         on_back.call(e);
     };
 
-    let toggle_preview = move |_| {
-        let mut p = show_preview;
-        p.set(!p());
-    };
+    let editor_error = tiptap_error();
 
     rsx! {
         div { class: Styles::dx_editor,
@@ -114,20 +177,39 @@ pub fn NoteEditor(
                 button {
                     class: Styles::dx_editor_back,
                     onclick: on_click_back,
-                    "\u{2190}  Notes"
-                }
-                button {
-                    class: Styles::dx_editor_back,
-                    onclick: toggle_preview,
-                    if show_preview() { "Edit" } else { "Preview" }
+                    ArrowLeft { size: 15, stroke: "currentColor" }
+                    span { "Notes" }
                 }
                 div { class: Styles::dx_editor_status,
-                    if saving() {
-                        "Saving..."
-                    } else if error().is_some() {
-                        "Save failed"
+                    if saving() { "Saving..." }
+                    else if error().is_some() { "Save failed" }
+                    else { "" }
+                }
+                if note_id.is_some() {
+                    if delete_confirm() {
+                        div { class: Styles::dx_editor_delete_confirm,
+                            span { "Delete?" }
+                            button {
+                                class: Styles::dx_editor_btn_confirm_yes,
+                                onclick: move |_| {
+                                    delete_confirm.set(false);
+                                    on_delete.call(());
+                                },
+                                "Yes"
+                            }
+                            button {
+                                class: Styles::dx_editor_btn_confirm_cancel,
+                                onclick: move |_| delete_confirm.set(false),
+                                "No"
+                            }
+                        }
                     } else {
-                        ""
+                        button {
+                            class: Styles::dx_editor_btn_delete,
+                            onclick: move |_| delete_confirm.set(true),
+                            Trash2 { size: 13, stroke: "currentColor" }
+                            span { "Delete" }
+                        }
                     }
                 }
             }
@@ -139,28 +221,21 @@ pub fn NoteEditor(
                         placeholder: "Untitled",
                         oninput: move |e| title.set(e.value()),
                     }
-                    if show_preview() {
-                        div {
-                            class: Styles::dx_editor_body,
-                            style: "white-space: normal; font-family: inherit;",
-                            dangerous_inner_html: "{preview_html}",
-                        }
-                    } else {
-                        textarea {
-                            class: Styles::dx_editor_body,
-                            value: "{body}",
-                            placeholder: "Start writing...",
-                            oninput: move |e| body.set(e.value()),
-                        }
-                    }
+                    div { id: "penumbra-editor" }
                     input {
                         class: Styles::dx_editor_tags,
                         value: "{tags}",
                         placeholder: "tag1, tag2, tag3",
                         oninput: move |e| tags.set(e.value()),
                     }
+                    div { class: Styles::dx_editor_meta,
+                        span { "{word_count(&body())} words" }
+                    }
                     {error().map(|msg| rsx! {
                         div { class: Styles::dx_editor_error, "{msg}" }
+                    })}
+                    {editor_error.as_ref().map(|msg| rsx! {
+                        div { class: Styles::dx_editor_error, "TipTap: {msg}" }
                     })}
                 }
             }
