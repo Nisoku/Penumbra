@@ -42,6 +42,11 @@ pub enum Event {
     StateRestored {
         positions: HashMap<NoteId, Position>,
     },
+    /// Set a single node's position in the layout engine (e.g. after a drag).
+    SetNodePosition {
+        id: NoteId,
+        position: Position,
+    },
 }
 
 pub struct EventBus {

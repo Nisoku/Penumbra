@@ -10,7 +10,7 @@ use penumbra_events::{Event, EventBus};
 use penumbra_graph::GraphStore;
 use penumbra_layout::LayoutEngine;
 use penumbra_storage::Storage;
-use penumbra_thread::{spawn_worker, Worker};
+use penumbra_thread::{spawn_worker, thread, Worker};
 
 use crate::state::AppState;
 
@@ -91,11 +91,23 @@ pub fn start_layout_worker(
     graph: Arc<std::sync::Mutex<GraphStore>>,
     event_bus: Arc<EventBus>,
 ) -> Worker {
+    let rx = event_bus.subscribe();
     spawn_worker("layout-worker", move |w| {
         let mut links_cache: Vec<Link> = Vec::new();
         let mut node_ids: Vec<NoteId> = Vec::new();
 
         while !w.is_cancelled() {
+            // Drain pending control events (non-blocking).
+            loop {
+                match rx.try_recv() {
+                    Ok(Event::SetNodePosition { id, position }) => {
+                        engine.set_position(&id, position);
+                    }
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+
             let (current_links, current_notes): (Vec<Link>, Vec<Note>) = match graph.lock() {
                 Ok(g) => (
                     g.all_links().into_iter().cloned().collect(),
@@ -133,7 +145,7 @@ pub fn start_layout_worker(
                 LAYOUT_INTERVAL_MS
             };
 
-            std::thread::sleep(Duration::from_millis(step_ms));
+            thread::sleep(Duration::from_millis(step_ms));
         }
     })
 }

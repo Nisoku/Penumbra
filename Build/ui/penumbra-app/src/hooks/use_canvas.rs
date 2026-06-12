@@ -12,62 +12,22 @@ pub fn use_canvas(
     let id = canvas_id.to_string();
     let mut initted = use_signal(|| false);
 
-    // Inject the RAF drawing loop once on ready
-    let inject_id = id.clone();
+    let init_id = id.clone();
+
+    // Set up canvas sizing and the draw function once
     use_effect(move || {
         if !ready() || *initted.read() {
             return;
         }
         *initted.write() = true;
-        let js = format!(
-            r#"(function(){{
-const canvas=document.getElementById('{inject_id}');
-if(!canvas)return;
-(function draw(){{
-const state=window.__penumbra_state;
-const w=canvas.width,h=canvas.height;
-const ctx=canvas.getContext('2d');
-if(!ctx){{requestAnimationFrame(draw);return;}}
-ctx.clearRect(0,0,w,h);
-if(state&&state.camera){{
-ctx.save();
-ctx.translate(state.camera.x,state.camera.y);
-ctx.scale(state.camera.zoom,state.camera.zoom);
-if(state.edges){{
-for(const e of state.edges){{
-const src=state.nodes.find(n=>n.id===e.source);
-const tgt=state.nodes.find(n=>n.id===e.target);
-if(!src||!tgt)continue;
-ctx.beginPath();
-ctx.moveTo(src.position.x,src.position.y);
-ctx.lineTo(tgt.position.x,tgt.position.y);
-ctx.strokeStyle=e.opacity>0.5?'rgba(99,148,220,0.7)':'rgba(99,148,220,0.35)';
-ctx.lineWidth=1.5;
-ctx.stroke();
-}}
-}}
-if(state.nodes){{
-for(const n of state.nodes){{
-const x=n.position.x;
-const y=n.position.y;
-const sel=n.id===state.selected_node;
-ctx.beginPath();
-ctx.arc(x,y,sel?6:4,0,Math.PI*2);
-ctx.fillStyle=sel?'#6394dc':'#2a4a7a';
-ctx.fill();
-}}
-}}
-ctx.restore();
-}}
-requestAnimationFrame(draw);
-}})();
-}})();"#
-        );
-        _ = document::eval(&js);
+        _ = document::eval(&format!(
+            "window.__penumbra_canvas_id='{init_id}';{}",
+            include_str!("../../assets/canvas-draw.js")
+        ));
     });
 
     // Resize canvas when window size changes
-    let resize_id = id.clone();
+    let resize_id = id;
     use_effect(move || {
         if !ready() {
             return;
@@ -78,7 +38,7 @@ requestAnimationFrame(draw);
         ));
     });
 
-    // Push render state to JS on every change
+    // Push render state + draw on every change
     use_effect(move || {
         if !ready() {
             return;
@@ -86,7 +46,9 @@ requestAnimationFrame(draw);
         let state = render_state();
         match serde_json::to_string(&state) {
             Ok(json) => {
-                _ = document::eval(&format!("window.__penumbra_state={json};"));
+                _ = document::eval(&format!(
+                    "window.__penumbra_state={json};window.__penumbra_draw();"
+                ));
             }
             Err(e) => {
                 tracing::error!("failed to serialize render state: {e}");

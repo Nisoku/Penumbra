@@ -174,6 +174,37 @@ impl AppState {
         Ok(())
     }
 
+    pub async fn toggle_pin(&self, id: &NoteId) -> Result<bool> {
+        let pinned = {
+            let mut g = self
+                .graph
+                .lock()
+                .map_err(|e| PenumbraError::Graph(format!("graph lock poisoned: {e}")))?;
+            let note = g
+                .get_note_mut(id)
+                .ok_or_else(|| PenumbraError::NoteNotFound(id.to_string()))?;
+            note.meta.pinned = !note.meta.pinned;
+            note.touch();
+            note.meta.pinned
+        };
+        let note = {
+            let g = self
+                .graph
+                .lock()
+                .map_err(|e| PenumbraError::Graph(format!("graph lock poisoned: {e}")))?;
+            g.get_note(id)
+                .cloned()
+                .ok_or_else(|| PenumbraError::NoteNotFound(id.to_string()))?
+        };
+        self.storage.save_note(&note).await?;
+        if pinned {
+            self.event_bus.try_publish(Event::NotePinned { id: *id });
+        } else {
+            self.event_bus.try_publish(Event::NoteUnpinned { id: *id });
+        }
+        Ok(pinned)
+    }
+
     pub fn link_notes(&self, source: &NoteId, target: &NoteId, kind: LinkKind) -> Result<Link> {
         let link = {
             let mut g = self

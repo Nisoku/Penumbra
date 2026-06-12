@@ -3,6 +3,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use penumbra_core::note::NoteId;
+use penumbra_markdown::parser::markdown_to_html;
 
 use crate::state::AppState;
 
@@ -18,6 +19,7 @@ pub fn NoteEditor(
     let mut title = use_signal(String::new);
     let mut body = use_signal(String::new);
     let mut tags = use_signal(String::new);
+    let show_preview = use_signal(|| false);
     let saving = use_signal(|| false);
     let error = use_signal(|| None::<String>);
 
@@ -36,6 +38,15 @@ pub fn NoteEditor(
             }
         }
         // New note is already empty from initial signal values
+    });
+
+    let preview_html = use_memo(move || {
+        let b = body();
+        if b.is_empty() {
+            String::new()
+        } else {
+            markdown_to_html(&b).unwrap_or_else(|_| b.clone())
+        }
     });
 
     let mut do_save = {
@@ -92,6 +103,11 @@ pub fn NoteEditor(
         on_back.call(e);
     };
 
+    let toggle_preview = move |_| {
+        let mut p = show_preview;
+        p.set(!p());
+    };
+
     rsx! {
         div { class: Styles::dx_editor,
             div { class: Styles::dx_editor_toolbar,
@@ -99,6 +115,11 @@ pub fn NoteEditor(
                     class: Styles::dx_editor_back,
                     onclick: on_click_back,
                     "\u{2190}  Notes"
+                }
+                button {
+                    class: Styles::dx_editor_back,
+                    onclick: toggle_preview,
+                    if show_preview() { "Edit" } else { "Preview" }
                 }
                 div { class: Styles::dx_editor_status,
                     if saving() {
@@ -118,11 +139,19 @@ pub fn NoteEditor(
                         placeholder: "Untitled",
                         oninput: move |e| title.set(e.value()),
                     }
-                    textarea {
-                        class: Styles::dx_editor_body,
-                        value: "{body}",
-                        placeholder: "Start writing...",
-                        oninput: move |e| body.set(e.value()),
+                    if show_preview() {
+                        div {
+                            class: Styles::dx_editor_body,
+                            style: "white-space: normal; font-family: inherit;",
+                            dangerous_inner_html: "{preview_html}",
+                        }
+                    } else {
+                        textarea {
+                            class: Styles::dx_editor_body,
+                            value: "{body}",
+                            placeholder: "Start writing...",
+                            oninput: move |e| body.set(e.value()),
+                        }
                     }
                     input {
                         class: Styles::dx_editor_tags,

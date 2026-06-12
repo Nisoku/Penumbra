@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use dioxus::prelude::*;
@@ -7,6 +7,7 @@ use dioxus_i18n::prelude::*;
 
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
+use penumbra_events as pevents;
 use unic_langid::langid;
 
 use crate::components::{Fab, FloatingSidebar, GraphCards, NoteEditor, TopBar};
@@ -33,7 +34,7 @@ pub fn App() -> Element {
     let graph_version: Signal<u64> = use_signal(|| 0);
     let ready: Signal<bool> = use_signal(|| false);
     let window_size: Signal<(f32, f32)> = use_signal(|| (1280.0, 800.0));
-    let selected: Signal<Option<NoteId>> = use_signal(|| None);
+    let mut selected: Signal<Option<NoteId>> = use_signal(|| None);
     let hovered: Signal<Option<NoteId>> = use_signal(|| None);
     let mut app_mode: Signal<AppMode> = use_signal(|| AppMode::Graph);
 
@@ -51,6 +52,10 @@ pub fn App() -> Element {
     // Note dragging
     let mut dragging_note: Signal<Option<NoteId>> = use_signal(|| None);
     let drag_offset: Signal<(f64, f64)> = use_signal(|| (0.0, 0.0));
+    let mut dragged_set: Signal<HashSet<NoteId>> = use_signal(HashSet::new);
+
+    // Tag filter for graph view
+    let selected_tag: Signal<Option<String>> = use_signal(|| None);
 
     // Center camera on viewport after init
     use_effect(move || {
@@ -61,7 +66,7 @@ pub fn App() -> Element {
     });
 
     // Initialization
-    use_init(app_state, positions, graph_version, ready);
+    use_init(app_state, positions, graph_version, ready, dragged_set);
 
     // Render state
     let render_state = use_render_state(
@@ -114,6 +119,59 @@ pub fn App() -> Element {
         AppMode::Graph => rsx! {
             div {
                 style: "width: 100vw; height: 100vh; background: #0a0f1e; position: relative; overflow: hidden;",
+                // Drag/move/up on root so they fire over all children (canvas, cards, etc.)
+                onmousemove: move |evt: Event<MouseData>| {
+                    let coords = evt.data.client_coordinates();
+                    if let Some(note_id) = *dragging_note.read() {
+                        let zoom = *camera.zoom.read();
+                        let (ox, oy) = *drag_offset.read();
+                        let wx = (coords.x - *camera.x.read()) / zoom - ox;
+                        let wy = (coords.y - *camera.y.read()) / zoom - oy;
+                        let pos = Position::new(wx, wy);
+                        positions.write().insert(note_id, pos);
+                        // Keep layout engine in sync so other notes don't jitter
+                        if let Some(ref s) = *app_state.read() {
+                            s.event_bus.try_publish(
+                                pevents::Event::SetNodePosition { id: note_id, position: pos },
+                            );
+                        }
+                        return;
+                    }
+                    if !is_panning() { return };
+                    let (sx, sy) = pan_start();
+                    let dx = coords.x - sx;
+                    let dy = coords.y - sy;
+                    camera.pan(dx, dy);
+                    pan_start.set((coords.x, coords.y));
+                },
+                onmouseup: move |_| {
+                    is_panning.set(false);
+                    if let Some(note_id) = *dragging_note.read() {
+                        if let Some(pos) = positions.read().get(&note_id).copied() {
+                            if let Some(ref s) = *app_state.read() {
+                                s.event_bus.try_publish(
+                                    pevents::Event::SetNodePosition { id: note_id, position: pos },
+                                );
+                            }
+                        }
+                        dragged_set.write().remove(&note_id);
+                    }
+                    dragging_note.set(None);
+                },
+                onmouseleave: move |_| {
+                    is_panning.set(false);
+                    if let Some(note_id) = *dragging_note.read() {
+                        if let Some(pos) = positions.read().get(&note_id).copied() {
+                            if let Some(ref s) = *app_state.read() {
+                                s.event_bus.try_publish(
+                                    pevents::Event::SetNodePosition { id: note_id, position: pos },
+                                );
+                            }
+                        }
+                        dragged_set.write().remove(&note_id);
+                    }
+                    dragging_note.set(None);
+                },
 
                 // Dot-grid background (CSS, decorative)
                 div {
@@ -132,32 +190,6 @@ pub fn App() -> Element {
                         let coords = evt.data.client_coordinates();
                         is_panning.set(true);
                         pan_start.set((coords.x, coords.y));
-                    },
-                    onmousemove: move |evt: Event<MouseData>| {
-                        let coords = evt.data.client_coordinates();
-                        // Note dragging takes priority
-                        if let Some(note_id) = *dragging_note.read() {
-                            let zoom = *camera.zoom.read();
-                            let (ox, oy) = *drag_offset.read();
-                            let wx = (coords.x - *camera.x.read()) / zoom - ox;
-                            let wy = (coords.y - *camera.y.read()) / zoom - oy;
-                            positions.write().insert(note_id, Position::new(wx, wy));
-                            return;
-                        }
-                        if !is_panning() { return };
-                        let (sx, sy) = pan_start();
-                        let dx = coords.x - sx;
-                        let dy = coords.y - sy;
-                        camera.pan(dx, dy);
-                        pan_start.set((coords.x, coords.y));
-                    },
-                    onmouseup: move |_| {
-                        is_panning.set(false);
-                        dragging_note.set(None);
-                    },
-                    onmouseleave: move |_| {
-                        is_panning.set(false);
-                        dragging_note.set(None);
                     },
                     onwheel: move |evt: Event<WheelData>| {
                         evt.prevent_default();
@@ -180,10 +212,31 @@ pub fn App() -> Element {
                     camera,
                     dragging_note,
                     drag_offset,
+                    dragged_set,
+                    filter_tag: selected_tag(),
+                    on_open_editor: {
+                        let mut mode = app_mode;
+                        move |note_id| {
+                            mode.set(AppMode::Editor { note_id: Some(note_id) });
+                        }
+                    },
                 }
 
                 TopBar {}
-                FloatingSidebar {}
+                FloatingSidebar {
+                    app_state,
+                    on_note_selected: move |note_id| {
+                        selected.set(Some(note_id));
+                        camera.drift_zoom(1.0);
+                        if let Some(pos) = positions.read().get(&note_id).copied() {
+                            camera.drift_to(pos);
+                        }
+                    },
+                    on_tag_filter: {
+                        let mut tag = selected_tag;
+                        move |t| tag.set(t)
+                    },
+                }
                 Fab {
                     onclick: move |_| {
                         if !ready() {
@@ -214,6 +267,9 @@ pub fn App() -> Element {
                 app_state,
                 note_id,
                 on_back: move |_| {
+                    camera.drift_zoom(1.0);
+                    let (w, h) = *window_size.read();
+                    camera.drift_to(Position::new(w as f64 / 2.0, h as f64 / 2.0));
                     app_mode.set(AppMode::Graph);
                 },
             }
