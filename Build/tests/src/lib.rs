@@ -1,4 +1,6 @@
 #[cfg(test)]
+mod app_matrix;
+#[cfg(test)]
 mod auto_link_matrix;
 #[cfg(test)]
 mod core_matrix;

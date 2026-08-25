@@ -1,0 +1,12 @@
+[package]
+name = "penumbra-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+penumbra-core = { path = "../penumbra-core" }
+penumbra-graph = { path = "../penumbra-graph" }
+penumbra-events = { path = "../penumbra-events" }
+penumbra-storage = { path = "../penumbra-storage" }
+tracing.workspace = true

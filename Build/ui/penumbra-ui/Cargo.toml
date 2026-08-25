@@ -1,0 +1,18 @@
+[package]
+name = "penumbra-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "penumbra"
+path = "src/main.rs"
+
+[dependencies]
+slint.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread"] }
+penumbra-app = { path = "../../crates/penumbra-app" }
+penumbra-core = { path = "../../crates/penumbra-core" }
+
+[build-dependencies]
+slint-build.workspace = true

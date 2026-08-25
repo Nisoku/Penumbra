@@ -11,6 +11,7 @@ use penumbra_core::link::Link;
 use penumbra_core::note::{Note, NoteId};
 use penumbra_core::position::Position;
 
+const APP_DIR: &str = "Penumbra";
 const NOTES_DIR: &str = "notes";
 const GRAPH_FILE: &str = "graph.json";
 const POSITIONS_FILE: &str = "positions.json";
@@ -21,9 +22,15 @@ pub struct Storage {
 
 impl Storage {
     pub async fn new() -> Result<Self> {
-        let root = app_specific_dir()
+        let data_dir = app_specific_dir()
             .await
             .map_err(|e| PenumbraError::Storage(format!("app dir: {e:?}")))?;
+        // The platform data dir is shared with other apps, so everything
+        // lives under a namespaced subdirectory on every target.
+        let root = data_dir
+            .get_directory_handle_with_options(APP_DIR, &GetDirectoryHandleOptions { create: true })
+            .await
+            .map_err(|e| PenumbraError::Storage(format!("app subdir: {e:?}")))?;
         Ok(Self { root })
     }
 

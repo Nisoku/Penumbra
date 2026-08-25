@@ -1,0 +1,110 @@
+import { Button, LineEdit } from "std-widgets.slint";
+
+export global Theme {
+    out property<color> ground: #F7F5F0;
+    out property<color> ground-sunken: #EFECE5;
+    out property<color> ink: #1F1D1A;
+    out property<color> ink-secondary: #6B675E;
+    out property<color> hairline: #1F1D1A24;
+    out property<color> accent: #3D56B0;
+}
+
+export component AppWindow inherits Window {
+    title: "Penumbra";
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Theme.ground;
+
+    callback new-note();
+    in property <string> status: "opening universe";
+    in property <bool> ready: false;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: 52px;
+        background: #F7F5F0E6;
+
+        Text {
+            x: 20px;
+            y: 0;
+            height: parent.height;
+            vertical-alignment: center;
+            text: "Penumbra";
+            font-size: 15px;
+            font-weight: 600;
+            color: Theme.ink;
+        }
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: 10px;
+            width: 340px;
+            height: 32px;
+            border-radius: 8px;
+            background: Theme.ground-sunken;
+
+            LineEdit {
+                x: 4px;
+                y: 2px;
+                width: parent.width - 8px;
+                height: parent.height - 4px;
+                placeholder-text: "Quick finder";
+                enabled: false;
+            }
+        }
+
+        Button {
+            x: parent.width - self.width - 20px;
+            y: (parent.height - self.height) / 2;
+            text: "New note";
+            enabled: root.ready;
+            clicked => { root.new-note(); }
+        }
+
+        // Hairline separating the band from the map plane.
+        Rectangle {
+            x: 0;
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: Theme.hairline;
+        }
+    }
+
+    // Chart-grid plane where note cards will float once the map lands.
+    Rectangle {
+        x: 0;
+        y: 52px;
+        width: parent.width;
+        height: parent.height - 52px;
+        background: Theme.ground;
+        clip: true;
+
+        property <length> grid-step: 120px;
+
+        for line[i] in 9: Rectangle {
+            x: parent.grid-step * (i + 1);
+            y: 0;
+            width: 1px;
+            height: parent.height;
+            background: Theme.hairline;
+        }
+        for row[i] in 5: Rectangle {
+            x: 0;
+            y: parent.grid-step * (i + 1);
+            width: parent.width;
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        Text {
+            x: 24px;
+            y: parent.height - 36px;
+            text: root.status;
+            font-size: 13px;
+            color: Theme.ink-secondary;
+        }
+    }
+}

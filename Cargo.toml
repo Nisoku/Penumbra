@@ -12,6 +12,8 @@ members = [
   "Build/crates/penumbra-markdown",
   "Build/crates/penumbra-sync",
   "Build/crates/penumbra-auto-link",
+  "Build/crates/penumbra-app",
+  "Build/ui/penumbra-ui",
   "Build/tests",
 ]
 
@@ -29,3 +31,5 @@ futures = "0.3"
 async-trait = "0.1"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+slint = "1.17"
+slint-build = "1.17"
