@@ -9,4 +9,5 @@ penumbra-core = { path = "../penumbra-core" }
 penumbra-graph = { path = "../penumbra-graph" }
 penumbra-events = { path = "../penumbra-events" }
 penumbra-storage = { path = "../penumbra-storage" }
+penumbra-markdown = { path = "../penumbra-markdown" }
 tracing.workspace = true

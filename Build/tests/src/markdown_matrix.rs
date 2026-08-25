@@ -2,11 +2,15 @@ use penumbra_markdown::ast::Block;
 use penumbra_markdown::ast::Document;
 use penumbra_markdown::ast::Inline;
 use penumbra_markdown::ast::Inline::*;
+use penumbra_markdown::frontmatter::{parse as parse_fm, serialize as serialize_fm, Frontmatter};
 use penumbra_markdown::parser::markdown_to_html;
 use penumbra_markdown::parser::markdown_to_plain;
 use penumbra_markdown::parser::parse_document;
 use penumbra_markdown::render::html::render_html;
 use penumbra_markdown::render::text::render_plain;
+
+use chrono::{TimeZone, Utc};
+use uuid::Uuid;
 
 // Parser tests
 
@@ -636,4 +640,158 @@ fn stream_snapshot_accumulates() {
     stream.append("# C\n\n").unwrap();
     let snap2 = stream.snapshot();
     assert!(snap2.blocks.len() >= snap1.blocks.len());
+}
+
+fn sample_frontmatter() -> Frontmatter {
+    Frontmatter {
+        id: Uuid::parse_str("fb5eb8b9-6808-4544-9f1b-a8b5d0726b3d").unwrap(),
+        created_at: Utc.with_ymd_and_hms(2026, 8, 25, 4, 4, 18).unwrap(),
+        updated_at: Utc.with_ymd_and_hms(2026, 8, 26, 10, 0, 0).unwrap(),
+        tags: vec!["project".to_string(), "two words".to_string()],
+        pinned: true,
+        archived: false,
+    }
+}
+
+#[test]
+fn frontmatter_roundtrip_preserves_fields() {
+    let fm = sample_frontmatter();
+    let text = serialize_fm(&fm).unwrap() + "Some body\n";
+    let parsed = parse_fm(&text).unwrap();
+    assert_eq!(parsed.frontmatter, Some(fm));
+    assert_eq!(parsed.body, "Some body\n");
+}
+
+#[test]
+fn file_without_frontmatter_parses_as_body_only() {
+    let parsed = parse_fm("just markdown\n").unwrap();
+    assert!(parsed.frontmatter.is_none());
+    assert_eq!(parsed.body, "just markdown\n");
+}
+
+#[test]
+fn unknown_keys_are_ignored_on_parse() {
+    let text = "---\nid: fb5eb8b9-6808-4544-9f1b-a8b5d0726b3d\ncreated: 2026-08-25T04:04:18Z\nupdated: 2026-08-25T04:04:18Z\ncustom: stuff\n---\nbody\n";
+    assert!(parse_fm(text).unwrap().frontmatter.is_some());
+}
+
+#[test]
+fn unterminated_block_is_an_error() {
+    let text = "---\nid: fb5eb8b9-6808-4544-9f1b-a8b5d0726b3d\n";
+    assert!(parse_fm(text).is_err());
+}
+
+#[test]
+fn quoted_tags_roundtrip_through_list_parser() {
+    let text = "---\nid: fb5eb8b9-6808-4544-9f1b-a8b5d0726b3d\ncreated: 2026-08-25T04:04:18Z\nupdated: 2026-08-25T04:04:18Z\ntags: [plain, \"has, comma\", \"quote\\\"d\"]\n---\n\n";
+    let fm = parse_fm(text).unwrap().frontmatter.unwrap();
+    assert_eq!(
+        fm.tags,
+        vec![
+            "plain".to_string(),
+            "has, comma".to_string(),
+            "quote\"d".to_string()
+        ]
+    );
+}
+
+#[test]
+fn byte_order_mark_is_stripped_before_fence_check() {
+    let text = format!("\u{feff}{}", serialize_fm(&sample_frontmatter()).unwrap());
+    assert!(parse_fm(&text).unwrap().frontmatter.is_some());
+}
+
+#[test]
+fn default_flags_are_omitted_from_output() {
+    let mut fm = sample_frontmatter();
+    fm.tags = Vec::new();
+    fm.pinned = false;
+    let text = serialize_fm(&fm).unwrap();
+    assert!(!text.contains("tags"));
+    assert!(!text.contains("pinned"));
+}
+
+#[test]
+fn malformed_timestamp_is_rejected() {
+    let text = "---\nid: fb5eb8b9-6808-4544-9f1b-a8b5d0726b3d\ncreated: not-a-time\nupdated: 2026-08-25T04:04:18Z\n---\n";
+    assert!(parse_fm(text).is_err());
+}
+
+// Wikilink and inline tag extraction tests
+
+use penumbra_markdown::links::{
+    extract_inline_tags, extract_wikilinks, normalize_link_target, rewrite_wikilink_targets,
+};
+
+fn links_of(body: &str) -> Vec<String> {
+    extract_wikilinks(&parse_document(body).unwrap())
+}
+
+fn tags_of(body: &str) -> Vec<String> {
+    extract_inline_tags(&parse_document(body).unwrap())
+}
+
+#[test]
+fn wikilinks_extract_deduped_in_order() {
+    assert_eq!(
+        links_of("See [[Alpha]] then [[Beta]] and [[Alpha]] again.\n"),
+        vec!["Alpha".to_string(), "Beta".to_string()]
+    );
+}
+
+#[test]
+fn wikilinks_reduce_aliases_anchors_and_paths() {
+    assert_eq!(normalize_link_target("Target|alias"), "Target");
+    assert_eq!(normalize_link_target("Target#section"), "Target");
+    assert_eq!(normalize_link_target("folder/sub/Target"), "Target");
+    assert_eq!(
+        links_of("[[Projects/Deep Note|the project]]\n"),
+        vec!["Deep Note".to_string()]
+    );
+}
+
+#[test]
+fn wikilinks_inside_code_are_not_links() {
+    assert_eq!(
+        links_of("`[[Not a link]]` and\n\n```\n[[Also not]]\n```\n"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn unicode_body_text_stays_intact_around_links() {
+    let doc = parse_document("Café résumé [[Ziel]] über #Étagère\n").unwrap();
+    assert_eq!(
+        doc.plain_text().split_whitespace().collect::<Vec<_>>(),
+        vec!["Café", "résumé", "Ziel", "über", "Étagère"]
+    );
+}
+
+#[test]
+fn inline_tags_extract_with_unicode_and_nesting() {
+    assert_eq!(
+        tags_of("#alpha and #nested/tag plus #Ünïcodé, done.\n"),
+        vec![
+            "alpha".to_string(),
+            "nested/tag".to_string(),
+            "Ünïcodé".to_string()
+        ]
+    );
+}
+
+#[test]
+fn hash_without_word_is_not_a_tag() {
+    assert_eq!(tags_of("a # b #1 c #[[x]]\n"), Vec::<String>::new());
+}
+
+#[test]
+fn rewrite_updates_bare_and_aliased_links_case_insensitively() {
+    let body = "see [[old title]] and [[Old Title|alias]], keep `[[old title]]`, keep:\n\n    [[old title]]\n\n```\n[[old title]]\n```\n";
+    let rewritten = rewrite_wikilink_targets(body, "Old Title", "New Title");
+    assert!(rewritten.contains("[[New Title]]"));
+    assert!(rewritten.contains("[[New Title|alias]]"));
+    // The bare link is rewritten; the inline-code, indented, and fenced
+    // copies stay untouched.
+    assert_eq!(rewritten.matches("[[old title]]").count(), 3);
+    assert_eq!(rewritten.matches("[[Old Title|").count(), 0);
 }

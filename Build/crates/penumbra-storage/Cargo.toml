@@ -6,10 +6,14 @@ license.workspace = true
 
 [dependencies]
 penumbra-core = { path = "../penumbra-core" }
-opfs = "0.2"
-serde.workspace = true
-serde_json.workspace = true
+penumbra-markdown = { path = "../penumbra-markdown" }
+futures.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
-futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+opfs = "0.2"
+dirs = "6"
+sanitize-filename = "0.6"

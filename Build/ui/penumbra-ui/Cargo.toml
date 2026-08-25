@@ -11,8 +11,15 @@ path = "src/main.rs"
 [dependencies]
 slint.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread"] }
+rfd = "0.17.2"
+opfs = "0.2"
+async-channel = "2"
+tracing.workspace = true
+serde_json.workspace = true
 penumbra-app = { path = "../../crates/penumbra-app" }
 penumbra-core = { path = "../../crates/penumbra-core" }
+penumbra-storage = { path = "../../crates/penumbra-storage" }
+penumbra-markdown = { path = "../../crates/penumbra-markdown" }
 
 [build-dependencies]
 slint-build.workspace = true

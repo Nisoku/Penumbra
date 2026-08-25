@@ -500,11 +500,10 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
     let mut result: Vec<Inline> = Vec::new();
     let mut buf = String::new();
     let bytes = text.as_bytes();
-    let len = bytes.len();
     let mut i = 0;
 
-    while i < len {
-        if i + 1 < len && bytes[i] == b'[' && bytes[i + 1] == b'[' {
+    while i < bytes.len() {
+        if bytes[i] == b'[' && bytes.get(i + 1) == Some(&b'[') {
             if let Some(end) = find_closing_bracket(text, i + 2) {
                 let ref_text = &text[i + 2..end];
                 if !ref_text.is_empty() {
@@ -514,17 +513,18 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
                     result.push(Inline::NoteEmbed {
                         note_ref: ref_text.to_string(),
                     });
+                    i = end + 2;
+                    continue;
                 }
-                i = end + 2;
-                continue;
             }
         }
 
         if bytes[i] == b'#'
             && (i == 0 || is_tag_boundary(bytes[i - 1]))
-            && i + 1 < len
-            && !bytes[i + 1].is_ascii_whitespace()
-            && bytes[i + 1] != b'#'
+            && text[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|next| !next.is_whitespace() && next != '#')
         {
             let tag_end = find_tag_end(text, i + 1);
             if tag_end > i + 1 {
@@ -539,8 +539,9 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
             }
         }
 
-        buf.push(bytes[i] as char);
-        i += 1;
+        let ch = text[i..].chars().next().expect("i is a char boundary");
+        buf.push(ch);
+        i += ch.len_utf8();
     }
 
     if !buf.is_empty() {
@@ -576,17 +577,17 @@ fn find_closing_bracket(text: &str, start: usize) -> Option<usize> {
 }
 
 fn find_tag_end(text: &str, start: usize) -> usize {
-    let bytes = text.as_bytes();
-    let mut i = start;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'-' || c == b'_' {
-            i += 1;
+    let mut end = start;
+    for c in text[start..].chars() {
+        // Unicode letters keep non-ASCII tags intact;
+        // slashes allow nested tags like #projects/penumbra.
+        if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+            end += c.len_utf8();
         } else {
             break;
         }
     }
-    i
+    end
 }
 
 fn is_tag_boundary(b: u8) -> bool {

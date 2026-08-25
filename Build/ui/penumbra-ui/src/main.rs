@@ -1,6 +1,10 @@
+mod vault;
+
 use std::sync::Arc;
 
 use penumbra_app::Universe;
+use penumbra_core::error::Result as PenumbraResult;
+use penumbra_storage::Storage;
 use slint::ComponentHandle;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -14,7 +18,7 @@ struct SharedState {
     io: tokio::runtime::Handle,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -29,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let boot_state = Arc::clone(&state);
     let boot_ui = ui.as_weak();
     runtime.spawn(async move {
-        match Universe::open_default().await {
+        match boot_universe().await {
             Ok(mut universe) => {
                 if universe.note_count() == 0 {
                     if let Err(err) = universe
@@ -56,6 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ui.run()?;
     drop(runtime);
     Ok(())
+}
+
+async fn boot_universe() -> PenumbraResult<Universe> {
+    let root = vault::resolve_root().await?;
+    let storage = Storage::with_dir(root).await;
+    Universe::open(storage).await
 }
 
 fn wire_new_note(ui: &AppWindow, state: &Arc<SharedState>) {
