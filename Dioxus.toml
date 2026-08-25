@@ -1,9 +1,0 @@
-[application]
-name = "Penumbra"
-
-[web.app]
-title = "Penumbra"
-
-[desktop]
-build = "cargo build -p penumbra-app"
-run = "cargo run -p penumbra-app"

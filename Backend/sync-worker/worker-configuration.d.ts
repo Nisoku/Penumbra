@@ -10384,7 +10384,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
      * @throws {ArtifactsError} with code `INVALID_INPUT` if tokenOrId is empty.
      */
     revokeToken(tokenOrId: string): Promise<boolean>;
-    // Fork
+    // ── Fork ──
     /**
      * Fork this repo to a new repo.
      * @param name Target repository name.
@@ -10399,7 +10399,7 @@ interface ArtifactsRepo extends ArtifactsRepoInfo {
         defaultBranchOnly?: boolean;
     }): Promise<ArtifactsCreateRepoResult>;
 }
-// Error types
+// ── Error types ──────────────────────────────────────────────────────────────
 /**
  * Error codes returned by Artifacts binding operations.
  *
@@ -10420,7 +10420,7 @@ interface ArtifactsError extends Error {
     /** Numeric error code matching the REST API. */
     readonly numericCode: number;
 }
-// Binding
+// ── Binding ──────────────────────────────────────────────────────────────────
 /**
  * Artifacts binding — namespace-level operations.
  *
