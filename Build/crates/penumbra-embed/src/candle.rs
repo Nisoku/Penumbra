@@ -20,6 +20,7 @@ pub struct CandleEmbedder {
 }
 
 impl CandleEmbedder {
+    /// Build an embedder from pre-constructed components.
     pub fn new(model: ArcticEmbedXS, tokenizer: Tokenizer, device: Device) -> Self {
         Self {
             model,
@@ -28,25 +29,23 @@ impl CandleEmbedder {
         }
     }
 
-    /// Download the model and tokenizer from HuggingFace Hub and load into memory.
-    #[cfg(feature = "candle-load")]
-    pub async fn load() -> Result<Self> {
-        let client = reqwest::Client::new();
-
-        let model_bytes = Self::download(&client, "model.safetensors").await?;
-        let config_bytes = Self::download(&client, "config.json").await?;
-        let tokenizer_bytes = Self::download(&client, "tokenizer.json").await?;
-
+    /// Build an embedder from raw model bytes.
+    pub fn from_bytes(
+        model_bytes: &[u8],
+        config_bytes: &[u8],
+        tokenizer_bytes: &[u8],
+    ) -> Result<Self> {
         let device = Device::Cpu;
-        let tokenizer = Tokenizer::from_bytes(&tokenizer_bytes)
+
+        let tokenizer = Tokenizer::from_bytes(tokenizer_bytes)
             .map_err(|e| PenumbraError::Embedding(format!("failed to load tokenizer: {e}")))?;
 
-        let config: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(e_msg)?;
+        let config: serde_json::Value = serde_json::from_slice(config_bytes).map_err(e_msg)?;
         let hidden_size = config["hidden_size"].as_u64().unwrap_or(384) as usize;
         let vocab_size = config["vocab_size"].as_u64().unwrap_or(30522) as usize;
 
         let vb = candle_nn::VarBuilder::from_buffered_safetensors(
-            model_bytes,
+            model_bytes.to_vec(),
             candle_core::DType::F32,
             &device,
         )
@@ -59,6 +58,18 @@ impl CandleEmbedder {
             tokenizer,
             device,
         })
+    }
+
+    /// Download from HuggingFace and build. Native only.
+    #[cfg(feature = "candle-load")]
+    pub async fn load() -> Result<Self> {
+        let client = reqwest::Client::new();
+
+        let model_bytes = Self::download(&client, "model.safetensors").await?;
+        let config_bytes = Self::download(&client, "config.json").await?;
+        let tokenizer_bytes = Self::download(&client, "tokenizer.json").await?;
+
+        Self::from_bytes(&model_bytes, &config_bytes, &tokenizer_bytes)
     }
 
     #[cfg(feature = "candle-load")]
@@ -103,7 +114,6 @@ impl EmbeddingProvider for CandleEmbedder {
 
         let embedding = self.model.forward(&input, &mask).map_err(e_msg)?;
 
-        // L2-normalize
         let squared_sum = embedding
             .powf(2.0)
             .map_err(e_msg)?

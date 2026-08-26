@@ -185,6 +185,46 @@ mod candle {
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
     }
+
+    #[cfg(feature = "candle-load")]
+    #[test]
+    fn inference_benchmark() {
+        use std::time::Instant;
+
+        let load_start = Instant::now();
+        let emb = pollster::block_on(CandleEmbedder::load()).unwrap();
+        let load_ms = load_start.elapsed().as_millis();
+
+        let samples = [
+            "The quick brown fox jumps over the lazy dog",
+            "Penumbra is a universe for your notes, built around a spatial canvas",
+            "Frontmatter tags and wikilinks create explicit structure",
+            "Candle runs on WASM via CPU backend, no GPU required",
+            "Arctic embed xs produces 384-dimensional normalized vectors",
+            "The Field Almanac uses tabular numerals and ink hairlines",
+            "Letterstorm motion uses spring overshoot between 1.03 and 1.05",
+            "Night theme ground color is hex 101423",
+            "Model caching uses Cache API on WASM, filesystem on native",
+            "Trigram hashing gives deterministic similarity without ML",
+        ];
+
+        let warmup = pollster::block_on(emb.embed_text(samples[0])).unwrap();
+        assert_eq!(warmup.len(), 384);
+
+        let embed_start = Instant::now();
+        for text in &samples {
+            let vec = pollster::block_on(emb.embed_text(text)).unwrap();
+            assert_eq!(vec.len(), 384);
+        }
+        let embed_ms = embed_start.elapsed().as_millis();
+        let per_note_ms = embed_ms as f64 / samples.len() as f64;
+
+        println!("inference benchmark");
+        println!("model load:  {load_ms} ms");
+        println!("10 notes:    {embed_ms} ms");
+        println!("per note:    {per_note_ms:.1} ms");
+        println!("dimensions:  {}", emb.dimensions());
+    }
 }
 
 // NullEmbedder

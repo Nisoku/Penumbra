@@ -4734,11 +4734,15 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "getrandom 0.3.4",
+ "js-sys",
  "penumbra-core",
  "reqwest",
  "serde_json",
  "tokenizers 0.23.1",
  "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -4874,6 +4878,7 @@ dependencies = [
  "opfs",
  "penumbra-app",
  "penumbra-core",
+ "penumbra-embed",
  "penumbra-markdown",
  "penumbra-storage",
  "rfd",
@@ -4882,6 +4887,8 @@ dependencies = [
  "slint-build",
  "tokio",
  "tracing",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

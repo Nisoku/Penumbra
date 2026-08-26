@@ -4,9 +4,13 @@ use opfs::persistent::DirectoryHandle;
 use penumbra_core::error::Result;
 use penumbra_storage::Storage;
 
+#[cfg(not(target_arch = "wasm32"))]
 const CONFIG_DIR: &str = "Penumbra";
+#[cfg(not(target_arch = "wasm32"))]
 const CONFIG_FILE: &str = "config.json";
+#[cfg(not(target_arch = "wasm32"))]
 const CONFIG_KEY: &str = "vault_path";
+#[cfg(not(target_arch = "wasm32"))]
 pub const ENV_VAULT_PATH: &str = "PENUMBRA_VAULT";
 
 #[cfg(not(target_arch = "wasm32"))]
