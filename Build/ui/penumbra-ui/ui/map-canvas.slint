@@ -1,0 +1,41 @@
+import { Theme, NoteCardVM } from "theme.slint";
+import { NoteCard } from "note-card.slint";
+
+export component MapCanvas inherits Rectangle {
+    background: Theme.ground;
+    clip: true;
+
+    in property <string> status: "";
+    in property <[NoteCardVM]> note-cards: [];
+    callback open-note(int);
+
+    property <length> grid-step: 120px;
+
+    for line[i] in 9: Rectangle {
+        x: parent.grid-step * (i + 1);
+        y: 0;
+        width: 1px;
+        height: parent.height;
+        background: Theme.hairline;
+    }
+    for row[i] in 5: Rectangle {
+        x: 0;
+        y: parent.grid-step * (i + 1);
+        width: parent.width;
+        height: 1px;
+        background: Theme.hairline;
+    }
+
+    for card in root.note-cards: NoteCard {
+        card: card;
+        activated(id) => { root.open-note(id); }
+    }
+
+    Text {
+        x: 24px;
+        y: parent.height - 36px;
+        text: root.status;
+        font-size: 13px;
+        color: Theme.ink-secondary;
+    }
+}

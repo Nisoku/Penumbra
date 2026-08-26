@@ -4726,6 +4726,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "penumbra-editor"
+version = "0.1.0"
+dependencies = [
+ "penumbra-core",
+ "penumbra-markdown",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "penumbra-embed"
 version = "0.1.0"
 dependencies = [
@@ -4852,6 +4864,7 @@ dependencies = [
  "penumbra-app",
  "penumbra-auto-link",
  "penumbra-core",
+ "penumbra-editor",
  "penumbra-embed",
  "penumbra-events",
  "penumbra-graph",
@@ -4878,6 +4891,7 @@ dependencies = [
  "opfs",
  "penumbra-app",
  "penumbra-core",
+ "penumbra-editor",
  "penumbra-embed",
  "penumbra-markdown",
  "penumbra-storage",

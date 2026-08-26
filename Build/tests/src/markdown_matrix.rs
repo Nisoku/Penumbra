@@ -1,4 +1,4 @@
-use penumbra_markdown::ast::Block;
+use penumbra_markdown::ast::BlockKind;
 use penumbra_markdown::ast::Document;
 use penumbra_markdown::ast::Inline;
 use penumbra_markdown::ast::Inline::*;
@@ -15,8 +15,8 @@ use uuid::Uuid;
 // Parser tests
 
 fn assert_para(doc: &Document, idx: usize, expected: &[Inline]) {
-    match &doc.blocks[idx] {
-        Block::Paragraph(children) => {
+    match &doc.blocks[idx].kind {
+        BlockKind::Paragraph(children) => {
             assert_eq!(children.len(), expected.len(), "para {} len", idx);
             for (i, (a, b)) in children.iter().zip(expected.iter()).enumerate() {
                 assert_eq!(a, b, "mismatch inline {} para {}", i, idx);
@@ -42,8 +42,8 @@ fn parser_plain() {
 #[test]
 fn parser_heading() {
     let doc = parse_document("# Hello").unwrap();
-    match &doc.blocks[0] {
-        Block::Heading { level, children } => {
+    match &doc.blocks[0].kind {
+        BlockKind::Heading { level, children } => {
             assert_eq!(*level, 1);
             assert_eq!(children, &[Text("Hello".into())]);
         }
@@ -55,8 +55,8 @@ fn parser_heading() {
 fn parser_heading_levels() {
     for (input, want) in [("## A", 2), ("### A", 3), ("#### A", 4)] {
         let doc = parse_document(input).unwrap();
-        match &doc.blocks[0] {
-            Block::Heading { level, .. } => assert_eq!(*level, want),
+        match &doc.blocks[0].kind {
+            BlockKind::Heading { level, .. } => assert_eq!(*level, want),
             other => panic!("got {:?}", other),
         }
     }
@@ -172,8 +172,8 @@ fn parser_tag_punct_end() {
 #[test]
 fn parser_double_hash() {
     let doc = parse_document("## heading").unwrap();
-    match &doc.blocks[0] {
-        Block::Heading { level, .. } => assert_eq!(*level, 2),
+    match &doc.blocks[0].kind {
+        BlockKind::Heading { level, .. } => assert_eq!(*level, 2),
         other => panic!("expected Heading, got {:?}", other),
     }
 }
@@ -181,8 +181,8 @@ fn parser_double_hash() {
 #[test]
 fn parser_fenced_code() {
     let doc = parse_document("```rust\nfn main() {}\n```").unwrap();
-    match &doc.blocks[0] {
-        Block::CodeBlock { language, text } => {
+    match &doc.blocks[0].kind {
+        BlockKind::CodeBlock { language, text } => {
             assert_eq!(language.as_deref(), Some("rust"));
             assert!(text.contains("fn main()"));
         }
@@ -193,8 +193,8 @@ fn parser_fenced_code() {
 #[test]
 fn parser_indented_code() {
     let doc = parse_document("    code line").unwrap();
-    match &doc.blocks[0] {
-        Block::CodeBlock { language, text } => {
+    match &doc.blocks[0].kind {
+        BlockKind::CodeBlock { language, text } => {
             assert!(language.is_none());
             assert_eq!(text.trim(), "code line");
         }
@@ -205,8 +205,8 @@ fn parser_indented_code() {
 #[test]
 fn parser_strong_em() {
     let doc = parse_document("**bold** and *italic*").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => {
             assert_eq!(children.len(), 3);
             match &children[0] {
                 Strong(c) => assert_eq!(c, &[Text("bold".into())]),
@@ -225,8 +225,8 @@ fn parser_strong_em() {
 #[test]
 fn parser_strikethrough() {
     let doc = parse_document("~~struck~~").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => match &children[0] {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => match &children[0] {
             Strikethrough(c) => assert_eq!(c, &[Text("struck".into())]),
             other => panic!("expected Strikethrough, got {:?}", other),
         },
@@ -237,8 +237,8 @@ fn parser_strikethrough() {
 #[test]
 fn parser_link() {
     let doc = parse_document("[text](http://example.com)").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => {
             assert_eq!(children.len(), 1);
             match &children[0] {
                 Link {
@@ -260,8 +260,8 @@ fn parser_link() {
 #[test]
 fn parser_link_title() {
     let doc = parse_document("[text](http://ex.com \"Title\")").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => match &children[0] {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => match &children[0] {
             Link { title, .. } => assert!(title.contains("Title")),
             other => panic!("expected Link, got {:?}", other),
         },
@@ -272,8 +272,8 @@ fn parser_link_title() {
 #[test]
 fn parser_image() {
     let doc = parse_document("![alt](http://ex.com/img.png)").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => match &children[0] {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => match &children[0] {
             Image { url, alt, .. } => {
                 assert_eq!(url, "http://ex.com/img.png");
                 assert_eq!(alt, "alt");
@@ -288,8 +288,8 @@ fn parser_image() {
 fn parser_ulist() {
     let doc = parse_document("- item one\n- item two").unwrap();
     assert!(!doc.blocks.is_empty());
-    match &doc.blocks[0] {
-        Block::List { ordered, items, .. } => {
+    match &doc.blocks[0].kind {
+        BlockKind::List { ordered, items, .. } => {
             assert!(!ordered);
             assert_eq!(items.len(), 2);
         }
@@ -300,8 +300,8 @@ fn parser_ulist() {
 #[test]
 fn parser_olist() {
     let doc = parse_document("1. first\n2. second").unwrap();
-    match &doc.blocks[0] {
-        Block::List { ordered, items, .. } => {
+    match &doc.blocks[0].kind {
+        BlockKind::List { ordered, items, .. } => {
             assert!(ordered);
             assert_eq!(items.len(), 2);
         }
@@ -312,8 +312,8 @@ fn parser_olist() {
 #[test]
 fn parser_quote() {
     let doc = parse_document("> quoted text").unwrap();
-    match &doc.blocks[0] {
-        Block::Quote(children) => assert!(!children.is_empty()),
+    match &doc.blocks[0].kind {
+        BlockKind::Quote(children) => assert!(!children.is_empty()),
         other => panic!("expected Quote, got {:?}", other),
     }
 }
@@ -322,7 +322,7 @@ fn parser_quote() {
 fn parser_hr() {
     let doc = parse_document("---\n").unwrap();
     assert_eq!(doc.blocks.len(), 1);
-    assert_eq!(doc.blocks[0], Block::ThematicBreak);
+    assert_eq!(doc.blocks[0].kind, BlockKind::ThematicBreak);
 }
 
 #[test]
@@ -361,17 +361,20 @@ fn parser_plain_text() {
 fn parser_mixed() {
     let doc = parse_document("# A\n\nB **C** D\n\n- list").unwrap();
     assert_eq!(doc.blocks.len(), 3);
-    assert!(matches!(doc.blocks[0], Block::Heading { level: 1, .. }));
-    assert!(matches!(doc.blocks[1], Block::Paragraph(_)));
-    assert!(matches!(doc.blocks[2], Block::List { .. }));
+    assert!(matches!(
+        doc.blocks[0].kind,
+        BlockKind::Heading { level: 1, .. }
+    ));
+    assert!(matches!(doc.blocks[1].kind, BlockKind::Paragraph(_)));
+    assert!(matches!(doc.blocks[2].kind, BlockKind::List { .. }));
 }
 
 #[test]
 fn parser_table() {
     let doc = parse_document("| H1 | H2 |\n|---|---|\n| C1 | C2 |").unwrap();
     assert!(!doc.blocks.is_empty());
-    match &doc.blocks[0] {
-        Block::Table(t) => {
+    match &doc.blocks[0].kind {
+        BlockKind::Table(t) => {
             assert!(!t.rows.is_empty());
             assert_eq!(t.rows[0].len(), 2);
         }
@@ -388,8 +391,8 @@ fn parser_footnote() {
 #[test]
 fn parser_task_list() {
     let doc = parse_document("- [x] done\n- [ ] todo").unwrap();
-    match &doc.blocks[0] {
-        Block::List { items, .. } => assert_eq!(items.len(), 2),
+    match &doc.blocks[0].kind {
+        BlockKind::List { items, .. } => assert_eq!(items.len(), 2),
         other => panic!("expected List, got {:?}", other),
     }
 }
@@ -411,8 +414,8 @@ fn parser_plain_rt() {
 #[test]
 fn parser_embed_inside_strong() {
     let doc = parse_document("**[[only]]**").unwrap();
-    match &doc.blocks[0] {
-        Block::Paragraph(children) => {
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => {
             assert_eq!(children.len(), 1);
             match &children[0] {
                 Strong(c) => {

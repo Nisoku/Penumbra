@@ -5,6 +5,8 @@ mod auto_link_matrix;
 #[cfg(test)]
 mod core_matrix;
 #[cfg(test)]
+mod editor_matrix;
+#[cfg(test)]
 mod embed_matrix;
 #[cfg(test)]
 mod events_matrix;

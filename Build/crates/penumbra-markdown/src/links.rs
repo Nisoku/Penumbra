@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::ast::{Block, Document, Inline};
+use crate::ast::{Block, BlockKind, Document, Inline};
 
 /// Collect wikilink targets referenced by a document, deduplicated in
 /// first-appearance order. Aliases (`[[Target|alias]]`), heading anchors
@@ -146,18 +146,18 @@ fn fence_opening(trimmed: &str) -> Option<&'static str> {
 
 fn collect_from_blocks(blocks: &[Block], visit: &mut dyn FnMut(&Inline)) {
     for block in blocks {
-        match block {
-            Block::Paragraph(inlines)
-            | Block::Heading {
+        match &block.kind {
+            BlockKind::Paragraph(inlines)
+            | BlockKind::Heading {
                 children: inlines, ..
             } => collect_from_inlines(inlines, visit),
-            Block::List { items, .. } => {
+            BlockKind::List { items, .. } => {
                 for item in items {
                     collect_from_blocks(&item.children, visit);
                 }
             }
-            Block::Quote(nested) => collect_from_blocks(nested, visit),
-            Block::Table(table) => {
+            BlockKind::Quote(nested) => collect_from_blocks(nested, visit),
+            BlockKind::Table(table) => {
                 for cell in &table.headers {
                     collect_from_inlines(cell, visit);
                 }
@@ -167,9 +167,9 @@ fn collect_from_blocks(blocks: &[Block], visit: &mut dyn FnMut(&Inline)) {
                     }
                 }
             }
-            Block::HtmlBlock(_) => {}
-            Block::FootnoteDefinition { children, .. } => collect_from_blocks(children, visit),
-            Block::CodeBlock { .. } | Block::ThematicBreak => {}
+            BlockKind::HtmlBlock(_) => {}
+            BlockKind::FootnoteDefinition { children, .. } => collect_from_blocks(children, visit),
+            BlockKind::CodeBlock { .. } | BlockKind::ThematicBreak => {}
         }
     }
 }

@@ -15,6 +15,8 @@ const WELCOME_BODY: &str = "This is your first note.\n\nEverything you write lan
 
 struct SharedState {
     universe: AsyncMutex<Option<Universe>>,
+    #[cfg(not(target_family = "wasm"))]
+    handle: tokio::runtime::Handle,
 }
 
 #[cfg_attr(target_family = "wasm", wasm_bindgen::prelude::wasm_bindgen(start))]
@@ -30,9 +32,12 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let state = Arc::new(SharedState {
         universe: AsyncMutex::new(None),
+        handle: runtime.handle().clone(),
     });
 
     wire_new_note(&ui, &state);
+    wire_editor(&ui);
+    wire_open_note(&ui);
 
     let boot_state = Arc::clone(&state);
     let boot_ui = ui.as_weak();
@@ -53,6 +58,8 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
     });
 
     wire_new_note(&ui, &state);
+    wire_editor(&ui);
+    wire_open_note(&ui);
 
     let boot_state = Arc::clone(&state);
     let boot_ui = ui.as_weak();
@@ -65,6 +72,16 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
+    set_status(&boot_ui, "loading embeddings...");
+
+    #[cfg(feature = "candle-load")]
+    {
+        match penumbra_embed::candle::CandleEmbedder::load_cached().await {
+            Ok(_emb) => set_status(&boot_ui, "embeddings ready"),
+            Err(e) => set_status(&boot_ui, &format!("embedding load failed: {e}")),
+        }
+    }
+
     match boot_universe().await {
         Ok(mut universe) => {
             if universe.note_count() == 0 {
@@ -77,11 +94,13 @@ async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
                 }
             }
             let count = universe.note_count();
+            let cards = build_note_cards(&universe);
             *state.universe.lock().await = Some(universe);
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = boot_ui.upgrade() {
                     ui.set_ready(true);
                     ui.set_status(format!("universe ready - {} notes", count).into());
+                    ui.set_note_cards(slint::ModelRc::new(slint::VecModel::from(cards)));
                 }
             });
         }
@@ -89,10 +108,75 @@ async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
     }
 }
 
+fn set_status(ui: &slint::Weak<AppWindow>, msg: &str) {
+    let ui = ui.clone();
+    let msg = msg.to_owned();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(ui) = ui.upgrade() {
+            ui.set_status(msg.into());
+        }
+    });
+}
+
 async fn boot_universe() -> PenumbraResult<Universe> {
     let root = vault::resolve_root().await?;
     let storage = Storage::with_dir(root).await;
     Universe::open(storage).await
+}
+
+fn build_note_cards(universe: &Universe) -> Vec<NoteCardVM> {
+    universe
+        .graph()
+        .all_notes()
+        .enumerate()
+        .map(|(i, note)| {
+            let col = (i % 5) as f32;
+            let row = (i / 5) as f32;
+            NoteCardVM {
+                id: note.id.as_uuid().as_u128() as i32,
+                title: note.title.as_str().into(),
+                preview: note
+                    .body
+                    .chars()
+                    .take(80)
+                    .collect::<String>()
+                    .as_str()
+                    .into(),
+                tags: note.tags.join(", ").as_str().into(),
+                x: 24.0 + col * 200.0,
+                y: 24.0 + row * 140.0,
+            }
+        })
+        .collect()
+}
+
+fn wire_open_note(ui: &AppWindow) {
+    let handle = ui.as_weak();
+    ui.on_open_note(move |card_id| {
+        let ui = handle.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui.upgrade() else {
+                return;
+            };
+            let demo = vec![
+                BlockVM {
+                    id: 0,
+                    text: "Welcome to Penumbra".into(),
+                    is_active: card_id == 0,
+                    kind: "heading".into(),
+                },
+                BlockVM {
+                    id: 1,
+                    text: "This is your first note.".into(),
+                    is_active: card_id == 1,
+                    kind: "paragraph".into(),
+                },
+            ];
+            let model = slint::VecModel::from(demo);
+            ui.set_editor_blocks(slint::ModelRc::new(model));
+            ui.set_editor_open(true);
+        });
+    });
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -102,8 +186,11 @@ fn wire_new_note(ui: &AppWindow, state: &Arc<SharedState>) {
     ui.on_new_note(move || {
         let state = Arc::clone(&state);
         let ui = handle.clone();
-        tokio::spawn(async move {
-            new_note_task(state, ui).await;
+        state.handle.spawn({
+            let state = Arc::clone(&state);
+            async move {
+                new_note_task(state, ui).await;
+            }
         });
     });
 }
@@ -132,9 +219,11 @@ async fn new_note_task(state: Arc<SharedState>, ui: slint::Weak<AppWindow>) {
     {
         Ok(_) => {
             let count = universe.note_count();
+            let cards = build_note_cards(universe);
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui.upgrade() {
                     ui.set_status(format!("universe ready - {} notes", count).into());
+                    ui.set_note_cards(slint::ModelRc::new(slint::VecModel::from(cards)));
                 }
             });
         }
@@ -147,6 +236,43 @@ async fn new_note_task(state: Arc<SharedState>, ui: slint::Weak<AppWindow>) {
             });
         }
     }
+}
+
+fn wire_editor(ui: &AppWindow) {
+    let handle_a = ui.as_weak();
+    ui.on_open_editor(move |block_id| {
+        let ui = handle_a.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui.upgrade() else {
+                return;
+            };
+
+            let demo = vec![
+                BlockVM { id: 0, text: "Welcome to Penumbra".into(), is_active: block_id == 0, kind: "heading".into() },
+                BlockVM { id: 1, text: "This is your first note.\n\nEverything you write lands on the map over time. Drag notes around, link them, and watch constellations form.".into(), is_active: block_id == 1, kind: "paragraph".into() },
+            ];
+
+            let model = slint::VecModel::from(demo);
+            ui.set_editor_blocks(slint::ModelRc::new(model));
+            ui.set_editor_open(true);
+        });
+    });
+
+    let handle_b = ui.as_weak();
+    ui.on_close_editor(move || {
+        let ui = handle_b.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = ui.upgrade() else {
+                return;
+            };
+            ui.set_editor_open(false);
+            ui.set_editor_blocks(slint::ModelRc::default());
+        });
+    });
+
+    ui.on_editor_text_changed(|block_id, text| {
+        tracing::trace!(block_id, %text, "editor text changed");
+    });
 }
 
 fn report_boot_failure(ui: slint::Weak<AppWindow>, message: &str) {

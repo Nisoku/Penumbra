@@ -11,6 +11,7 @@ members = [
   "Build/crates/penumbra-storage",
   "Build/crates/penumbra-markdown",
   "Build/crates/penumbra-sync",
+  "Build/crates/penumbra-editor",
   "Build/crates/penumbra-auto-link",
   "Build/crates/penumbra-app",
   "Build/ui/penumbra-ui",

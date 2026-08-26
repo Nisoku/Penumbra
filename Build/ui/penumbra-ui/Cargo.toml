@@ -23,10 +23,13 @@ penumbra-core = { path = "../../crates/penumbra-core" }
 penumbra-storage = { path = "../../crates/penumbra-storage" }
 penumbra-markdown = { path = "../../crates/penumbra-markdown" }
 penumbra-embed = { path = "../../crates/penumbra-embed" }
+penumbra-editor = { path = "../../crates/penumbra-editor" }
 
 [features]
 default = []
 candle = ["penumbra-embed/candle"]
+candle-load = ["penumbra-embed/candle-load"]
+candle-wasm = ["candle-load"]
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }

@@ -1,6 +1,6 @@
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Tag, TagEnd};
 
-use crate::ast::{Block, Document, Inline, ListItem, Table, TableAlign};
+use crate::ast::{Block, BlockId, BlockKind, Document, Inline, ListItem, Table, TableAlign};
 use penumbra_core::error::Result;
 
 pub fn parse_document(text: &str) -> Result<Document> {
@@ -108,7 +108,10 @@ impl Ctx {
             Rule => {
                 self.flush_text();
                 self.flush();
-                self.blocks.push(Block::ThematicBreak);
+                self.blocks.push(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::ThematicBreak,
+                });
             }
             TaskListMarker(checked) => {
                 self.flush_text();
@@ -261,30 +264,45 @@ impl Ctx {
             TagEnd::Paragraph => {
                 self.pop_frame();
                 let children = std::mem::take(&mut self.inlines);
-                self.push_block(Block::Paragraph(children));
+                self.push_block(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::Paragraph(children),
+                });
             }
             TagEnd::Heading(_) => {
                 if let Some(Frame::Heading { level }) = self.pop_frame() {
                     let children = std::mem::take(&mut self.inlines);
-                    self.push_block(Block::Heading { level, children });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Heading { level, children },
+                    });
                 }
             }
             TagEnd::BlockQuote(_) => {
                 if let Some(Frame::Quote(children)) = self.pop_frame() {
-                    self.push_block(Block::Quote(children));
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Quote(children),
+                    });
                 }
             }
             TagEnd::CodeBlock => {
                 if let Some(Frame::CodeBlock { language, text }) = self.pop_frame() {
-                    self.push_block(Block::CodeBlock { language, text });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::CodeBlock { language, text },
+                    });
                 }
             }
             TagEnd::List(ordered) => {
                 if let Some(Frame::List { items, start, .. }) = self.pop_frame() {
-                    self.push_block(Block::List {
-                        ordered,
-                        start,
-                        items,
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::List {
+                            ordered,
+                            start,
+                            items,
+                        },
                     });
                 }
             }
@@ -297,7 +315,10 @@ impl Ctx {
                         ref mut children, ..
                     }) = self.stack.last_mut()
                     {
-                        children.push(Block::Paragraph(inlines));
+                        children.push(Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::Paragraph(inlines),
+                        });
                     }
                 }
                 if let Some(Frame::ListItem {
@@ -326,11 +347,14 @@ impl Ctx {
                 let headers = std::mem::take(&mut self.table_headers);
                 let rows = std::mem::take(&mut self.table_body);
                 self.table_phase = TablePhase::None;
-                self.push_block(Block::Table(Table {
-                    headers,
-                    rows,
-                    align,
-                }));
+                self.push_block(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::Table(Table {
+                        headers,
+                        rows,
+                        align,
+                    }),
+                });
             }
             TagEnd::TableHead => {
                 let row = std::mem::take(&mut self.table_row_buf);
@@ -355,7 +379,10 @@ impl Ctx {
             }
             TagEnd::FootnoteDefinition => {
                 if let Some(Frame::FootnoteDefinition { name, children }) = self.pop_frame() {
-                    self.push_block(Block::FootnoteDefinition { name, children });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::FootnoteDefinition { name, children },
+                    });
                 }
             }
             TagEnd::Emphasis => {
@@ -415,7 +442,10 @@ impl Ctx {
             return;
         }
         let children = std::mem::take(&mut self.inlines);
-        self.push_block(Block::Paragraph(children));
+        self.push_block(Block {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph(children),
+        });
     }
 
     fn push_block(&mut self, block: Block) {

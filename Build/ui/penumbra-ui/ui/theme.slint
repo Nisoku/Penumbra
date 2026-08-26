@@ -1,0 +1,25 @@
+export global Theme {
+    out property<color> ground: #F7F5F0;
+    out property<color> ground-sunken: #EFECE5;
+    out property<color> ink: #1F1D1A;
+    out property<color> ink-secondary: #6B675E;
+    out property<color> ink-tertiary: #98938A;
+    out property<color> hairline: #1F1D1A24;
+    out property<color> accent: #3D56B0;
+}
+
+export struct BlockVM {
+    id: int,
+    text: string,
+    is-active: bool,
+    kind: string,
+}
+
+export struct NoteCardVM {
+    id: int,
+    title: string,
+    preview: string,
+    tags: string,
+    x: length,
+    y: length,
+}
