@@ -1,0 +1,114 @@
+import { TextEdit } from "std-widgets.slint";
+import { Theme, BlockVM } from "theme.slint";
+
+export component EditorPanel inherits Rectangle {
+    background: Theme.ground;
+    clip: true;
+
+    in property <[BlockVM]> blocks: [];
+    in property <bool> open: false;
+    in property <length> panel-width: root.width;
+    callback open-block(int);
+    callback close();
+    callback text-changed(int, string);
+
+    x: root.open ? 0px : root.panel-width;
+    visible: root.open;
+    animate x { duration: 200ms; easing: cubic-bezier(0.25, 0.1, 0.25, 1); }
+
+    Rectangle {
+        width: 100%;
+        height: 32px;
+        y: 0;
+        background: Theme.ground-sunken;
+
+        Text {
+            x: 20px;
+            height: 100%;
+            vertical-alignment: center;
+            text: "Editor";
+            font-size: 13px;
+            font-weight: 600;
+            color: Theme.ink;
+        }
+
+        Rectangle {
+            x: parent.width - 36px;
+            y: (parent.height - 20px) / 2;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            background: esc-touch.has-hover ? Theme.hairline : transparent;
+
+            esc-touch := TouchArea {
+                clicked => { root.close(); }
+            }
+
+            Text {
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                text: "Esc";
+                font-size: 10px;
+                color: Theme.ink-secondary;
+            }
+        }
+    }
+
+    Flickable {
+        y: 32px;
+        width: 100%;
+        height: parent.height - 32px;
+
+        VerticalLayout {
+            padding-top: 20px;
+            padding-bottom: 20px;
+            padding-left: 20px;
+            padding-right: 20px;
+            spacing: 4px;
+            width: parent.width;
+
+            for block in root.blocks: VerticalLayout {
+                spacing: 0px;
+                width: parent.width;
+
+                if !block.is-active: Rectangle {
+                    border-radius: 4px;
+                    width: 100%;
+                    height: block-text.preferred-height + 24px;
+
+                    block-text := Text {
+                        x: 16px;
+                        y: 12px;
+                        width: parent.width - 32px;
+                        text: block.text;
+                        font-size: 15px;
+                        color: Theme.ink-secondary;
+                        wrap: TextWrap.word-wrap;
+                        overflow: elide;
+                    }
+
+                    TouchArea {
+                        clicked => { root.open-block(block.id); }
+                    }
+                }
+
+                if block.is-active: Rectangle {
+                    border-radius: 4px;
+                    background: Theme.ground-sunken;
+                    width: 100%;
+                    height: Math.max(100px, edit-area.preferred-height + 24px);
+
+                    edit-area := TextEdit {
+                        x: 16px;
+                        y: 12px;
+                        width: parent.width - 32px;
+                        text: block.text;
+                        font-size: 15px;
+                        wrap: TextWrap.word-wrap;
+                        edited => { root.text-changed(block.id, self.text); }
+                    }
+                }
+            }
+        }
+    }
+}

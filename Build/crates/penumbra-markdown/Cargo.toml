@@ -11,6 +11,9 @@ ammonia = "4"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde_norway = "0.9"
 mdstream = { version = "0.2", optional = true, default-features = false }
 
 [features]

@@ -34,3 +34,15 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"], o
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 reqwest = { version = "0.13", default-features = false, optional = true }
 getrandom = { version = "0.3", features = ["wasm_js"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+  "Cache",
+  "CacheStorage",
+  "Request",
+  "RequestInit",
+  "Response",
+  "ResponseInit",
+  "Window",
+] }

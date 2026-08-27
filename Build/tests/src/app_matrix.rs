@@ -14,7 +14,9 @@ fn with_rt(f: impl Future<Output = ()>) {
 
 fn temp_storage() -> (tempfile::TempDir, Storage) {
     let dir = tempfile::TempDir::new().unwrap();
-    let root = DirectoryHandle::from(dir.path().join("universe"));
+    let path = dir.path().join("vault");
+    std::fs::create_dir_all(&path).unwrap();
+    let root = DirectoryHandle::from(path);
     let storage = pollster::block_on(Storage::with_dir(root));
     (dir, storage)
 }
@@ -34,13 +36,13 @@ fn created_note_survives_universe_reopen() {
         let (guard, storage) = temp_storage();
         let mut universe = Universe::open(storage).await.unwrap();
         let id = universe
-            .create_note("Alpha".to_string(), "first body".to_string())
+            .create_note("Alpha".to_string(), "first body\n".to_string())
             .await
             .unwrap();
         drop(universe);
 
         let reopen = pollster::block_on(Storage::with_dir(DirectoryHandle::from(
-            guard.path().join("universe"),
+            guard.path().join("vault"),
         )));
         let universe = Universe::open(reopen).await.unwrap();
         assert_eq!(universe.note_count(), 1);
@@ -54,22 +56,23 @@ fn saved_body_edit_persists_across_reopen() {
         let (guard, storage) = temp_storage();
         let mut universe = Universe::open(storage).await.unwrap();
         let id = universe
-            .create_note("Beta".to_string(), String::new())
+            .create_note("Beta".to_string(), "original\n".to_string())
             .await
             .unwrap();
 
         let mut edited = universe.graph().get_note(&id).unwrap().clone();
-        edited.body = "rewritten body".to_string();
+        edited.body = "rewritten body\n".to_string();
+        edited.touch();
         universe.save_note(edited).await.unwrap();
         drop(universe);
 
         let reopen = pollster::block_on(Storage::with_dir(DirectoryHandle::from(
-            guard.path().join("universe"),
+            guard.path().join("vault"),
         )));
         let universe = Universe::open(reopen).await.unwrap();
         assert_eq!(
             universe.graph().get_note(&id).unwrap().body,
-            "rewritten body"
+            "rewritten body\n"
         );
     });
 }
@@ -80,14 +83,15 @@ fn deleted_note_is_gone_after_reopen() {
         let (guard, storage) = temp_storage();
         let mut universe = Universe::open(storage).await.unwrap();
         let id = universe
-            .create_note("Gamma".to_string(), "doomed".to_string())
+            .create_note("Gamma".to_string(), "doomed\n".to_string())
             .await
             .unwrap();
         universe.delete_note(&id).await.unwrap();
+        assert_eq!(universe.note_count(), 0);
         drop(universe);
 
         let reopen = pollster::block_on(Storage::with_dir(DirectoryHandle::from(
-            guard.path().join("universe"),
+            guard.path().join("vault"),
         )));
         let universe = Universe::open(reopen).await.unwrap();
         assert_eq!(universe.note_count(), 0);

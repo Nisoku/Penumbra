@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use candle_core::{Device, Error as CandleError, Tensor};
-use candle_nn::Module;
+use candle_transformers::models::bert::{BertModel, Config as BertConfig};
 use penumbra_core::embed::{Embedding, EmbeddingProvider};
 use penumbra_core::error::{PenumbraError, Result};
 use tokenizers::Tokenizer;
@@ -28,7 +28,32 @@ impl CandleEmbedder {
         }
     }
 
-    /// Download the model and tokenizer from HuggingFace Hub and load into memory.
+    pub fn from_bytes(
+        model_bytes: &[u8],
+        config_bytes: &[u8],
+        tokenizer_bytes: &[u8],
+    ) -> Result<Self> {
+        let device = Device::Cpu;
+
+        let tokenizer = Tokenizer::from_bytes(tokenizer_bytes)
+            .map_err(|e| PenumbraError::Embedding(format!("failed to load tokenizer: {e}")))?;
+
+        let vb = candle_nn::VarBuilder::from_buffered_safetensors(
+            model_bytes.to_vec(),
+            candle_core::DType::F32,
+            &device,
+        )
+        .map_err(e_msg)?;
+
+        let model = ArcticEmbedXS::new(config_bytes, vb).map_err(e_msg)?;
+
+        Ok(Self {
+            model,
+            tokenizer,
+            device,
+        })
+    }
+
     #[cfg(feature = "candle-load")]
     pub async fn load() -> Result<Self> {
         let client = reqwest::Client::new();
@@ -37,28 +62,28 @@ impl CandleEmbedder {
         let config_bytes = Self::download(&client, "config.json").await?;
         let tokenizer_bytes = Self::download(&client, "tokenizer.json").await?;
 
-        let device = Device::Cpu;
-        let tokenizer = Tokenizer::from_bytes(&tokenizer_bytes)
-            .map_err(|e| PenumbraError::Embedding(format!("failed to load tokenizer: {e}")))?;
+        Self::from_bytes(&model_bytes, &config_bytes, &tokenizer_bytes)
+    }
 
-        let config: serde_json::Value = serde_json::from_slice(&config_bytes).map_err(e_msg)?;
-        let hidden_size = config["hidden_size"].as_u64().unwrap_or(384) as usize;
-        let vocab_size = config["vocab_size"].as_u64().unwrap_or(30522) as usize;
+    #[cfg(feature = "candle-load")]
+    pub async fn load_cached() -> Result<Self> {
+        let client = reqwest::Client::new();
 
-        let vb = candle_nn::VarBuilder::from_buffered_safetensors(
-            model_bytes,
-            candle_core::DType::F32,
-            &device,
-        )
-        .map_err(e_msg)?;
+        let model_bytes = Self::cached_or_download(&client, "model.safetensors").await?;
+        let config_bytes = Self::cached_or_download(&client, "config.json").await?;
+        let tokenizer_bytes = Self::cached_or_download(&client, "tokenizer.json").await?;
 
-        let model = ArcticEmbedXS::new(vocab_size, hidden_size, vb).map_err(e_msg)?;
+        Self::from_bytes(&model_bytes, &config_bytes, &tokenizer_bytes)
+    }
 
-        Ok(Self {
-            model,
-            tokenizer,
-            device,
-        })
+    #[cfg(feature = "candle-load")]
+    async fn cached_or_download(client: &reqwest::Client, filename: &str) -> Result<Vec<u8>> {
+        if let Some(bytes) = crate::model_cache::get(filename).await {
+            return Ok(bytes);
+        }
+        let bytes = Self::download(client, filename).await?;
+        crate::model_cache::put(filename, &bytes).await;
+        Ok(bytes)
     }
 
     #[cfg(feature = "candle-load")]
@@ -103,7 +128,6 @@ impl EmbeddingProvider for CandleEmbedder {
 
         let embedding = self.model.forward(&input, &mask).map_err(e_msg)?;
 
-        // L2-normalize
         let squared_sum = embedding
             .powf(2.0)
             .map_err(e_msg)?
@@ -125,38 +149,33 @@ impl EmbeddingProvider for CandleEmbedder {
     }
 }
 
-/// Minimal BERT-style embedding model.
 pub struct ArcticEmbedXS {
     hidden_size: usize,
-    embed: candle_nn::Embedding,
-    encoder: candle_nn::Linear,
+    bert: BertModel,
 }
 
 impl ArcticEmbedXS {
     pub fn new(
-        vocab_size: usize,
-        hidden_size: usize,
+        config_bytes: &[u8],
         vb: candle_nn::VarBuilder,
     ) -> std::result::Result<Self, CandleError> {
-        let embed =
-            candle_nn::embedding(vocab_size, hidden_size, vb.pp("embeddings.word_embeddings"))?;
-        let encoder = candle_nn::linear(hidden_size, hidden_size, vb.pp("encoder.layer.0"))?;
-
-        Ok(Self {
-            hidden_size,
-            embed,
-            encoder,
-        })
+        let config: BertConfig =
+            serde_json::from_slice(config_bytes).map_err(|e| CandleError::Msg(e.to_string()))?;
+        let hidden_size = config.hidden_size;
+        let bert = BertModel::load(vb, &config)?;
+        Ok(Self { hidden_size, bert })
     }
 
     pub fn forward(
         &self,
         input_ids: &Tensor,
-        _attention_mask: &Tensor,
+        attention_mask: &Tensor,
     ) -> std::result::Result<Tensor, CandleError> {
-        let x = self.embed.forward(input_ids)?;
-        let x = x.mean(1)?;
-        let x = self.encoder.forward(&x)?;
-        Ok(x)
+        let token_type_ids = input_ids.zeros_like()?;
+        let sequence_output =
+            self.bert
+                .forward(input_ids, &token_type_ids, Some(attention_mask))?;
+        let pooled = sequence_output.mean(1)?;
+        Ok(pooled)
     }
 }

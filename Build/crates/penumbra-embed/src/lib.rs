@@ -5,6 +5,8 @@ pub use simple::SimpleEmbedder;
 #[cfg(feature = "candle")]
 pub mod candle;
 
+pub mod model_cache;
+
 use async_trait::async_trait;
 use penumbra_core::embed::{Embedding, EmbeddingProvider};
 use penumbra_core::error::Result;
