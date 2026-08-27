@@ -11,7 +11,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   fmt:
@@ -31,6 +30,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+    env:
+      CARGO_BUILD_JOBS: 4
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -53,6 +54,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+    env:
+      CARGO_BUILD_JOBS: 4
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +76,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+    env:
+      CARGO_BUILD_JOBS: 4
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -125,6 +130,8 @@ jobs:
           ')
           cargo install wasm-bindgen-cli --version "$bindgen" --locked
       - name: Build UI (wasm release)
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo build --release --target wasm32-unknown-unknown -p penumbra-ui --features candle-wasm
 
       # wasm-bindgen binds the build output into a runnable pkg/ bundle.
