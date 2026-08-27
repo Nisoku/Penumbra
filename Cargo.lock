@@ -4893,6 +4893,8 @@ dependencies = [
  "penumbra-core",
  "penumbra-editor",
  "penumbra-embed",
+ "penumbra-graph",
+ "penumbra-layout",
  "penumbra-markdown",
  "penumbra-storage",
  "rfd",

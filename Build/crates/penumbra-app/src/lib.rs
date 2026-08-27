@@ -52,6 +52,11 @@ impl Universe {
         &self.graph
     }
 
+    /// Read-only access to the storage backend.
+    pub fn storage(&self) -> &Storage {
+        &self.storage
+    }
+
     /// Number of notes currently held in memory.
     pub fn note_count(&self) -> usize {
         self.graph.note_count()

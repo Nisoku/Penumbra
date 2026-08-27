@@ -1,4 +1,4 @@
-import { Theme, BlockVM, NoteCardVM } from "theme.slint";
+import { Theme, BlockVM, NoteCardVM, EdgeVM } from "theme.slint";
 import { TopBar } from "top-bar.slint";
 import { MapCanvas } from "map-canvas.slint";
 import { EditorPanel } from "editor-panel.slint";
@@ -13,6 +13,7 @@ export component AppWindow inherits Window {
     in property <string> status: "opening universe";
     in property <bool> ready: false;
     in property <[NoteCardVM]> note-cards: [];
+    in property <[EdgeVM]> edges: [];
     in property <[BlockVM]> editor-blocks: [];
     in property <bool> editor-open: false;
     callback open-editor(int);
@@ -35,6 +36,7 @@ export component AppWindow inherits Window {
         height: parent.height - 52px;
         status: root.status;
         note-cards: root.note-cards;
+        edges: root.edges;
         open-note(id) => { root.open-note(id); }
     }
 
