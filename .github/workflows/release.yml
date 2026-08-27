@@ -22,17 +22,12 @@ jobs:
 
       - name: Install wasm-bindgen-cli
         run: |
-          bindgen=$(cargo metadata --format-version 1 | python3 -c '
-            import sys, json
-            meta = json.load(sys.stdin)
-            for pkg in meta["packages"]:
-                if pkg["name"] == "wasm-bindgen":
-                    print(pkg["version"])
-                    break
-          ')
+          bindgen=$(cargo metadata --format-version 1 | python3 -c "import sys,json;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='wasm-bindgen'))")
           cargo install wasm-bindgen-cli --version "$bindgen" --locked
 
       - name: Build UI (wasm release)
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo build --release --target wasm32-unknown-unknown -p penumbra-ui --features candle-wasm
 
       - name: Run wasm-bindgen
@@ -64,6 +59,8 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 4
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +75,8 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-deps
       - name: Build release binary
+        env:
+          RUSTFLAGS: -D warnings
         run: cargo build --release -p penumbra-ui --features candle --target ${{ matrix.target }}
       - name: Stage binary
         run: |
