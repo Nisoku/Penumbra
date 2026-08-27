@@ -1,6 +1,6 @@
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Tag, TagEnd};
 
-use crate::ast::{Block, Document, Inline, ListItem, Table, TableAlign};
+use crate::ast::{Block, BlockId, BlockKind, Document, Inline, ListItem, Table, TableAlign};
 use penumbra_core::error::Result;
 
 pub fn parse_document(text: &str) -> Result<Document> {
@@ -108,7 +108,10 @@ impl Ctx {
             Rule => {
                 self.flush_text();
                 self.flush();
-                self.blocks.push(Block::ThematicBreak);
+                self.blocks.push(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::ThematicBreak,
+                });
             }
             TaskListMarker(checked) => {
                 self.flush_text();
@@ -261,30 +264,45 @@ impl Ctx {
             TagEnd::Paragraph => {
                 self.pop_frame();
                 let children = std::mem::take(&mut self.inlines);
-                self.push_block(Block::Paragraph(children));
+                self.push_block(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::Paragraph(children),
+                });
             }
             TagEnd::Heading(_) => {
                 if let Some(Frame::Heading { level }) = self.pop_frame() {
                     let children = std::mem::take(&mut self.inlines);
-                    self.push_block(Block::Heading { level, children });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Heading { level, children },
+                    });
                 }
             }
             TagEnd::BlockQuote(_) => {
                 if let Some(Frame::Quote(children)) = self.pop_frame() {
-                    self.push_block(Block::Quote(children));
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Quote(children),
+                    });
                 }
             }
             TagEnd::CodeBlock => {
                 if let Some(Frame::CodeBlock { language, text }) = self.pop_frame() {
-                    self.push_block(Block::CodeBlock { language, text });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::CodeBlock { language, text },
+                    });
                 }
             }
             TagEnd::List(ordered) => {
                 if let Some(Frame::List { items, start, .. }) = self.pop_frame() {
-                    self.push_block(Block::List {
-                        ordered,
-                        start,
-                        items,
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::List {
+                            ordered,
+                            start,
+                            items,
+                        },
                     });
                 }
             }
@@ -297,7 +315,10 @@ impl Ctx {
                         ref mut children, ..
                     }) = self.stack.last_mut()
                     {
-                        children.push(Block::Paragraph(inlines));
+                        children.push(Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::Paragraph(inlines),
+                        });
                     }
                 }
                 if let Some(Frame::ListItem {
@@ -326,11 +347,14 @@ impl Ctx {
                 let headers = std::mem::take(&mut self.table_headers);
                 let rows = std::mem::take(&mut self.table_body);
                 self.table_phase = TablePhase::None;
-                self.push_block(Block::Table(Table {
-                    headers,
-                    rows,
-                    align,
-                }));
+                self.push_block(Block {
+                    id: BlockId::new(),
+                    kind: BlockKind::Table(Table {
+                        headers,
+                        rows,
+                        align,
+                    }),
+                });
             }
             TagEnd::TableHead => {
                 let row = std::mem::take(&mut self.table_row_buf);
@@ -355,7 +379,10 @@ impl Ctx {
             }
             TagEnd::FootnoteDefinition => {
                 if let Some(Frame::FootnoteDefinition { name, children }) = self.pop_frame() {
-                    self.push_block(Block::FootnoteDefinition { name, children });
+                    self.push_block(Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::FootnoteDefinition { name, children },
+                    });
                 }
             }
             TagEnd::Emphasis => {
@@ -415,7 +442,10 @@ impl Ctx {
             return;
         }
         let children = std::mem::take(&mut self.inlines);
-        self.push_block(Block::Paragraph(children));
+        self.push_block(Block {
+            id: BlockId::new(),
+            kind: BlockKind::Paragraph(children),
+        });
     }
 
     fn push_block(&mut self, block: Block) {
@@ -500,11 +530,10 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
     let mut result: Vec<Inline> = Vec::new();
     let mut buf = String::new();
     let bytes = text.as_bytes();
-    let len = bytes.len();
     let mut i = 0;
 
-    while i < len {
-        if i + 1 < len && bytes[i] == b'[' && bytes[i + 1] == b'[' {
+    while i < bytes.len() {
+        if bytes[i] == b'[' && bytes.get(i + 1) == Some(&b'[') {
             if let Some(end) = find_closing_bracket(text, i + 2) {
                 let ref_text = &text[i + 2..end];
                 if !ref_text.is_empty() {
@@ -514,17 +543,18 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
                     result.push(Inline::NoteEmbed {
                         note_ref: ref_text.to_string(),
                     });
+                    i = end + 2;
+                    continue;
                 }
-                i = end + 2;
-                continue;
             }
         }
 
         if bytes[i] == b'#'
             && (i == 0 || is_tag_boundary(bytes[i - 1]))
-            && i + 1 < len
-            && !bytes[i + 1].is_ascii_whitespace()
-            && bytes[i + 1] != b'#'
+            && text[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|next| !next.is_whitespace() && next != '#')
         {
             let tag_end = find_tag_end(text, i + 1);
             if tag_end > i + 1 {
@@ -539,8 +569,9 @@ fn split_text_for_custom(text: &str) -> Vec<Inline> {
             }
         }
 
-        buf.push(bytes[i] as char);
-        i += 1;
+        let ch = text[i..].chars().next().expect("i is a char boundary");
+        buf.push(ch);
+        i += ch.len_utf8();
     }
 
     if !buf.is_empty() {
@@ -576,17 +607,17 @@ fn find_closing_bracket(text: &str, start: usize) -> Option<usize> {
 }
 
 fn find_tag_end(text: &str, start: usize) -> usize {
-    let bytes = text.as_bytes();
-    let mut i = start;
-    while i < bytes.len() {
-        let c = bytes[i];
-        if c.is_ascii_alphanumeric() || c == b'-' || c == b'_' {
-            i += 1;
+    let mut end = start;
+    for c in text[start..].chars() {
+        // Unicode letters keep non-ASCII tags intact;
+        // slashes allow nested tags like #projects/penumbra.
+        if c.is_alphanumeric() || c == '-' || c == '_' || c == '/' {
+            end += c.len_utf8();
         } else {
             break;
         }
     }
-    i
+    end
 }
 
 fn is_tag_boundary(b: u8) -> bool {

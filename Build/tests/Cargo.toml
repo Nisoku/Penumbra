@@ -18,13 +18,17 @@ penumbra-embed = { path = "../crates/penumbra-embed" }
 penumbra-index = { path = "../crates/penumbra-index" }
 penumbra-search = { path = "../crates/penumbra-search" }
 penumbra-storage = { path = "../crates/penumbra-storage" }
+penumbra-app = { path = "../crates/penumbra-app" }
 penumbra-markdown = { path = "../crates/penumbra-markdown" }
 penumbra-auto-link = { path = "../crates/penumbra-auto-link" }
+penumbra-editor = { path = "../crates/penumbra-editor" }
 penumbra-sync = { path = "../crates/penumbra-sync" }
 serde_json.workspace = true
 uuid.workspace = true
 futures.workspace = true
 chrono.workspace = true
+tempfile = "3"
+opfs = "0.2"
 tokio = { version = "1", features = ["rt", "macros"] }
 async-channel = "2"
 pollster = "0.4"

@@ -8,55 +8,176 @@ mod candle {
     use penumbra_core::embed::EmbeddingProvider;
     use penumbra_embed::candle::{ArcticEmbedXS, CandleEmbedder};
 
-    fn test_safetensors(vocab_size: usize, hidden_size: usize) -> Vec<u8> {
-        let embed_len = vocab_size * hidden_size;
-        let enc_w_len = hidden_size * hidden_size;
+    const TEST_VOCAB: usize = 10;
+    const TEST_HIDDEN: usize = 8;
+    const TEST_NUM_LAYERS: usize = 1;
+    const TEST_NUM_HEADS: usize = 2;
 
-        let embed_data: Vec<f32> = (0..embed_len)
-            .map(|i| ((i as f32) * 0.01).fract())
-            .collect();
-        let enc_w_data: Vec<f32> = (0..enc_w_len)
-            .map(|i| ((i as f32 * 0.1 + 0.5) % 1.0))
-            .collect();
-        let enc_b_data = vec![0.0f32; hidden_size];
-
-        let embed_bytes: Vec<u8> = embed_data.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let enc_w_bytes: Vec<u8> = enc_w_data.iter().flat_map(|v| v.to_le_bytes()).collect();
-        let enc_b_bytes: Vec<u8> = enc_b_data.iter().flat_map(|v| v.to_le_bytes()).collect();
-
-        let embed_off = 0u64;
-        let embed_end = embed_off + embed_bytes.len() as u64;
-        let enc_w_off = embed_end;
-        let enc_w_end = enc_w_off + enc_w_bytes.len() as u64;
-        let enc_b_off = enc_w_end;
-        let enc_b_end = enc_b_off + enc_b_bytes.len() as u64;
-
-        let metadata = serde_json::json!({
-            "embeddings.word_embeddings.weight": {
-                "dtype": "F32",
-                "shape": [vocab_size, hidden_size],
-                "data_offsets": [embed_off, embed_end]
-            },
-            "encoder.layer.0.weight": {
-                "dtype": "F32",
-                "shape": [hidden_size, hidden_size],
-                "data_offsets": [enc_w_off, enc_w_end]
-            },
-            "encoder.layer.0.bias": {
-                "dtype": "F32",
-                "shape": [hidden_size],
-                "data_offsets": [enc_b_off, enc_b_end]
-            }
+    fn test_config_bytes() -> Vec<u8> {
+        let cfg = serde_json::json!({
+            "hidden_size": TEST_HIDDEN,
+            "num_hidden_layers": TEST_NUM_LAYERS,
+            "num_attention_heads": TEST_NUM_HEADS,
+            "intermediate_size": TEST_HIDDEN * 2,
+            "vocab_size": TEST_VOCAB,
+            "max_position_embeddings": 32,
+            "type_vocab_size": 2,
+            "hidden_act": "gelu",
+            "hidden_dropout_prob": 0.0,
+            "attention_probs_dropout_prob": 0.0,
+            "layer_norm_eps": 1e-12,
+            "pad_token_id": 0,
+            "initializer_range": 0.02,
+            "classifier_dropout": null,
+            "position_embedding_type": "absolute",
+            "use_cache": false,
+            "model_type": "bert",
         });
+        serde_json::to_vec(&cfg).unwrap()
+    }
 
-        let meta_str = metadata.to_string();
+    fn test_safetensors() -> Vec<u8> {
+        let h = TEST_HIDDEN;
+        let v = TEST_VOCAB;
+        let n = TEST_NUM_LAYERS;
+
+        let f32s = |count: usize| -> Vec<u8> {
+            (0..count)
+                .flat_map(|i| ((i as f32 * 0.01).fract()).to_le_bytes())
+                .collect()
+        };
+
+        let mut tensors = vec![
+            (
+                "bert.embeddings.word_embeddings.weight".into(),
+                f32s(v * h),
+                vec![v, h],
+            ),
+            (
+                "bert.embeddings.position_embeddings.weight".into(),
+                f32s(32 * h),
+                vec![32, h],
+            ),
+            (
+                "bert.embeddings.token_type_embeddings.weight".into(),
+                f32s(2 * h),
+                vec![2, h],
+            ),
+            ("bert.embeddings.LayerNorm.weight".into(), f32s(h), vec![h]),
+            ("bert.embeddings.LayerNorm.bias".into(), f32s(h), vec![h]),
+        ];
+
+        for i in 0..n {
+            let prefix = format!("bert.encoder.layer.{i}");
+            tensors.push((
+                format!("{prefix}.attention.self.query.weight"),
+                f32s(h * h),
+                vec![h, h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.self.query.bias"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.self.key.weight"),
+                f32s(h * h),
+                vec![h, h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.self.key.bias"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.self.value.weight"),
+                f32s(h * h),
+                vec![h, h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.self.value.bias"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.output.dense.weight"),
+                f32s(h * h),
+                vec![h, h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.output.dense.bias"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.output.LayerNorm.weight"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.attention.output.LayerNorm.bias"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((
+                format!("{prefix}.intermediate.dense.weight"),
+                f32s(h * h * 2),
+                vec![h * 2, h],
+            ));
+            tensors.push((
+                format!("{prefix}.intermediate.dense.bias"),
+                f32s(h * 2),
+                vec![h * 2],
+            ));
+            tensors.push((
+                format!("{prefix}.output.dense.weight"),
+                f32s(h * h * 2),
+                vec![h, h * 2],
+            ));
+            tensors.push((format!("{prefix}.output.dense.bias"), f32s(h), vec![h]));
+            tensors.push((
+                format!("{prefix}.output.LayerNorm.weight"),
+                f32s(h),
+                vec![h],
+            ));
+            tensors.push((format!("{prefix}.output.LayerNorm.bias"), f32s(h), vec![h]));
+        }
+
+        tensors.push(("bert.pooler.dense.weight".into(), f32s(h * h), vec![h, h]));
+        tensors.push(("bert.pooler.dense.bias".into(), f32s(h), vec![h]));
+
+        let mut offsets: Vec<(String, u64, u64, Vec<usize>)> = Vec::new();
+        let mut cursor: u64 = 0;
+        let mut data_sections: Vec<Vec<u8>> = Vec::new();
+
+        for (name, bytes, shape) in &tensors {
+            let off = cursor;
+            let end = cursor + bytes.len() as u64;
+            offsets.push((name.clone(), off, end, shape.clone()));
+            data_sections.push(bytes.clone());
+            cursor = end;
+        }
+
+        let mut metadata = serde_json::Map::new();
+        for (name, off, end, shape) in &offsets {
+            metadata.insert(
+                name.clone(),
+                serde_json::json!({
+                    "dtype": "F32",
+                    "shape": shape,
+                    "data_offsets": [off, end]
+                }),
+            );
+        }
+
+        let meta_str = serde_json::Value::Object(metadata).to_string();
         let meta_bytes = meta_str.as_bytes();
         let mut buf = Vec::new();
         buf.extend_from_slice(&(meta_bytes.len() as u64).to_le_bytes());
         buf.extend_from_slice(meta_bytes);
-        buf.extend_from_slice(&embed_bytes);
-        buf.extend_from_slice(&enc_w_bytes);
-        buf.extend_from_slice(&enc_b_bytes);
+        for data in &data_sections {
+            buf.extend_from_slice(data);
+        }
         buf
     }
 
@@ -83,37 +204,35 @@ mod candle {
         serde_json::to_vec(&cfg).unwrap()
     }
 
-    fn test_model(
-        vocab_size: usize,
-        hidden_size: usize,
-    ) -> (ArcticEmbedXS, tokenizers::Tokenizer, Device) {
+    fn test_model() -> (ArcticEmbedXS, tokenizers::Tokenizer, Device) {
         let device = Device::Cpu;
+        let config = test_config_bytes();
         let vb = candle_nn::VarBuilder::from_buffered_safetensors(
-            test_safetensors(vocab_size, hidden_size),
+            test_safetensors(),
             DType::F32,
             &device,
         )
         .unwrap();
-        let model = ArcticEmbedXS::new(vocab_size, hidden_size, vb).unwrap();
-        let tokenizer = tokenizers::Tokenizer::from_bytes(&test_tokenizer_bytes()).unwrap();
+        let model = ArcticEmbedXS::new(&config, vb).unwrap();
+        let tokenizer = tokenizers::Tokenizer::from_bytes(test_tokenizer_bytes()).unwrap();
         (model, tokenizer, device)
     }
 
     #[test]
     fn forward_output_shape() {
-        let (model, _, device) = test_model(50, 8);
+        let (model, _, device) = test_model();
         let ids = Tensor::new(&[1u32, 2, 3], &device)
             .unwrap()
             .unsqueeze(0)
             .unwrap();
         let mask = Tensor::ones(&[1, 3], DType::U32, &device).unwrap();
         let out = model.forward(&ids, &mask).unwrap();
-        assert_eq!(out.shape().dims(), &[1, 8]);
+        assert_eq!(out.shape().dims(), &[1, TEST_HIDDEN]);
     }
 
     #[test]
     fn forward_l2_normalized() {
-        let (model, _, device) = test_model(50, 8);
+        let (model, _, device) = test_model();
         let ids = Tensor::new(&[5u32, 6, 7], &device)
             .unwrap()
             .unsqueeze(0)
@@ -137,7 +256,7 @@ mod candle {
 
     #[test]
     fn forward_nonzero() {
-        let (model, _, device) = test_model(50, 8);
+        let (model, _, device) = test_model();
         let ids = Tensor::new(&[5u32, 6, 7], &device)
             .unwrap()
             .unsqueeze(0)
@@ -158,32 +277,70 @@ mod candle {
 
     #[test]
     fn embedder_dimensions() {
-        let (model, tokenizer, device) = test_model(50, 16);
-        let emb = CandleEmbedder::new(model, tokenizer, device);
-        assert_eq!(emb.dimensions(), 16);
+        let (model, tokenizer, _device) = test_model();
+        let emb = CandleEmbedder::new(model, tokenizer, Device::Cpu);
+        assert_eq!(emb.dimensions(), TEST_HIDDEN);
     }
 
     #[test]
     fn embedder_embed_text_roundtrips() {
-        let (model, tokenizer, device) = test_model(50, 16);
-        let emb = CandleEmbedder::new(model, tokenizer, device);
+        let (model, tokenizer, _device) = test_model();
+        let emb = CandleEmbedder::new(model, tokenizer, Device::Cpu);
         let vec = pollster::block_on(emb.embed_text("hello world")).unwrap();
-        assert_eq!(vec.len(), 16);
+        assert_eq!(vec.len(), TEST_HIDDEN);
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-5, "norm={norm} != 1.0");
     }
 
     #[cfg(feature = "candle-load")]
-    #[test]
-    fn load_downloads_and_embeds() {
-        // Downloads the real model from HuggingFace Hub.
-        // Run: cargo test --features candle candle-load -p penumbra-tests
-        let emb = pollster::block_on(CandleEmbedder::load()).unwrap();
+    #[tokio::test]
+    async fn load_downloads_and_embeds() {
+        let emb = CandleEmbedder::load().await.unwrap();
         assert_eq!(emb.dimensions(), 384);
-        let vec = pollster::block_on(emb.embed_text("hello world")).unwrap();
+        let vec = emb.embed_text("hello world").await.unwrap();
         assert_eq!(vec.len(), 384);
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-4, "norm={norm}");
+    }
+
+    #[cfg(feature = "candle-load")]
+    #[tokio::test]
+    async fn inference_benchmark() {
+        use std::time::Instant;
+
+        let load_start = Instant::now();
+        let emb = CandleEmbedder::load().await.unwrap();
+        let load_ms = load_start.elapsed().as_millis();
+
+        let samples = [
+            "The quick brown fox jumps over the lazy dog",
+            "Penumbra is a universe for your notes, built around a spatial canvas",
+            "Frontmatter tags and wikilinks create explicit structure",
+            "Candle runs on WASM via CPU backend, no GPU required",
+            "Arctic embed xs produces 384-dimensional normalized vectors",
+            "The Field Almanac uses tabular numerals and ink hairlines",
+            "Letterstorm motion uses spring overshoot between 1.03 and 1.05",
+            "Night theme ground color is hex 101423",
+            "Model caching uses Cache API on WASM, filesystem on native",
+            "Trigram hashing gives deterministic similarity without ML",
+        ];
+
+        let warmup = emb.embed_text(samples[0]).await.unwrap();
+        assert_eq!(warmup.len(), 384);
+
+        let embed_start = Instant::now();
+        for text in &samples {
+            let vec = emb.embed_text(text).await.unwrap();
+            assert_eq!(vec.len(), 384);
+        }
+        let embed_ms = embed_start.elapsed().as_millis();
+        let per_note_ms = embed_ms as f64 / samples.len() as f64;
+
+        println!("--- inference benchmark ---");
+        println!("model load:  {load_ms} ms");
+        println!("10 notes:    {embed_ms} ms");
+        println!("per note:    {per_note_ms:.1} ms");
+        println!("dimensions:  {}", emb.dimensions());
     }
 }
 
@@ -327,7 +484,6 @@ fn simple_embedder_empty_string() {
     let emb = SimpleEmbedder::new(64);
     let vec = futures::executor::block_on(emb.embed_text("")).unwrap();
     assert_eq!(vec.len(), 64);
-    // Empty string has no trigrams, so the embedding is all zeros
     for v in &vec {
         assert_eq!(*v, 0.0);
     }

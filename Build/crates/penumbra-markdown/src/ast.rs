@@ -1,4 +1,30 @@
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
+
+static NEXT_BLOCK_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BlockId(u64);
+
+impl BlockId {
+    pub fn new() -> Self {
+        Self(NEXT_BLOCK_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+impl Default for BlockId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for BlockId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "B{}", self.0)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -20,14 +46,26 @@ impl Document {
             if !buf.is_empty() {
                 buf.push('\n');
             }
-            block.write_plain_text(&mut buf);
+            block.kind.write_plain_text(&mut buf);
         }
         buf
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Block {
+    pub id: BlockId,
+    pub kind: BlockKind,
+}
+
+impl PartialEq for Block {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Block {
+pub enum BlockKind {
     Paragraph(Vec<Inline>),
     Heading {
         level: u8,
@@ -52,30 +90,30 @@ pub enum Block {
     },
 }
 
-impl Block {
+impl BlockKind {
     pub fn write_plain_text(&self, buf: &mut String) {
         match self {
-            Block::Paragraph(children) | Block::Heading { children, .. } => {
+            BlockKind::Paragraph(children) | BlockKind::Heading { children, .. } => {
                 for child in children {
                     child.write_plain_text(buf);
                 }
             }
-            Block::CodeBlock { text, .. } => buf.push_str(text),
-            Block::List { items, .. } => {
+            BlockKind::CodeBlock { text, .. } => buf.push_str(text),
+            BlockKind::List { items, .. } => {
                 for item in items {
                     for child in &item.children {
-                        child.write_plain_text(buf);
+                        child.kind.write_plain_text(buf);
                     }
                     buf.push('\n');
                 }
             }
-            Block::Quote(children) => {
+            BlockKind::Quote(children) => {
                 for child in children {
-                    child.write_plain_text(buf);
+                    child.kind.write_plain_text(buf);
                 }
             }
-            Block::ThematicBreak => {}
-            Block::Table(table) => {
+            BlockKind::ThematicBreak => {}
+            BlockKind::Table(table) => {
                 for row in &table.rows {
                     for cell in row {
                         for inline in cell {
@@ -86,10 +124,10 @@ impl Block {
                     buf.push('\n');
                 }
             }
-            Block::HtmlBlock(html) => buf.push_str(&strip_html(html)),
-            Block::FootnoteDefinition { children, .. } => {
+            BlockKind::HtmlBlock(html) => buf.push_str(&strip_html(html)),
+            BlockKind::FootnoteDefinition { children, .. } => {
                 for child in children {
-                    child.write_plain_text(buf);
+                    child.kind.write_plain_text(buf);
                 }
             }
         }

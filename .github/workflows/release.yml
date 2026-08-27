@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-wasm:
+    name: Build WASM PWA
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Install wasm-bindgen-cli
+        run: |
+          bindgen=$(cargo metadata --format-version 1 | python3 -c '
+            import sys, json
+            meta = json.load(sys.stdin)
+            for pkg in meta["packages"]:
+                if pkg["name"] == "wasm-bindgen":
+                    print(pkg["version"])
+                    break
+          ')
+          cargo install wasm-bindgen-cli --version "$bindgen" --locked
+
+      - name: Build UI (wasm release)
+        run: cargo build --release --target wasm32-unknown-unknown -p penumbra-ui --features candle-wasm
+
+      - name: Run wasm-bindgen
+        run: |
+          mkdir -p dist/pwa
+          wasm-bindgen \
+            --no-typescript \
+            --target web \
+            --out-dir dist/pwa \
+            target/wasm32-unknown-unknown/release/penumbra_ui.wasm
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: penumbra-wasm
+          path: dist/pwa/
+          if-no-files-found: error
+
+  publish-native:
+    name: Build native binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          key: ${{ matrix.target }}
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-deps
+      - name: Build release binary
+        run: cargo build --release -p penumbra-ui --features candle --target ${{ matrix.target }}
+      - name: Stage binary
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/penumbra dist/penumbra-${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: penumbra-${{ matrix.target }}
+          path: dist/penumbra-${{ matrix.target }}
+          if-no-files-found: error

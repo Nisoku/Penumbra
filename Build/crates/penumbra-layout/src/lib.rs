@@ -1,3 +1,5 @@
+mod cpu;
+
 use std::collections::HashMap;
 
 use penumbra_core::link::Link;
@@ -6,6 +8,8 @@ use penumbra_core::position::{Bounds, Position};
 use vibe_graph_layout_gpu::{
     Edge as VibeEdge, GpuLayout, LayoutConfig as GpuConfig, Position as VibePos,
 };
+
+use cpu::CpuForceLayout;
 
 /// Configuration for the GPU-accelerated layout engine.
 #[derive(Debug, Clone)]
@@ -71,6 +75,7 @@ impl From<&LayoutConfig> for GpuConfig {
 /// zero displacement (graceful degradation for headless / WebGPU-less enviros).
 pub struct LayoutEngine {
     inner: Option<GpuLayout>,
+    cpu: Option<CpuForceLayout>,
     nodes: Vec<NoteId>,
     index_map: HashMap<NoteId, u32>,
     positions: Vec<VibePos>,
@@ -91,6 +96,7 @@ impl LayoutEngine {
         let gpu = GpuLayout::new(GpuConfig::from(&config)).await.ok();
         Self {
             inner: gpu,
+            cpu: Some(CpuForceLayout::new(Vec::new(), Vec::new(), config.clone())),
             nodes: Vec::new(),
             index_map: HashMap::new(),
             positions: Vec::new(),
@@ -235,6 +241,8 @@ impl LayoutEngine {
 
         let old_positions: Vec<VibePos> = self.positions.clone();
 
+        let mut gpu_stepped = false;
+
         // GPU step (skipped when no backend or empty edges as wgpu rejects
         // zero-sized storage buffers).
         if let Some(ref mut gpu) = self.inner {
@@ -249,12 +257,36 @@ impl LayoutEngine {
                 match gpu.step() {
                     Ok(new_positions) => {
                         self.positions.copy_from_slice(new_positions);
+                        gpu_stepped = true;
                     }
                     Err(e) => {
                         tracing::error!("GPU layout step failed: {e}");
-                        self.iteration += 1;
-                        return 0.0;
                     }
+                }
+            }
+        }
+
+        // CPU fallback when GPU is unavailable or failed.
+        if !gpu_stepped {
+            if let Some(ref mut cpu) = self.cpu {
+                if self.dirty {
+                    let cpu_edges: Vec<(usize, usize)> = self
+                        .edges
+                        .iter()
+                        .map(|e| (e.source as usize, e.target as usize))
+                        .collect();
+                    let cpu_positions: Vec<Position> = self
+                        .positions
+                        .iter()
+                        .map(|p| Position::new(p.x as f64, p.y as f64))
+                        .collect();
+                    *cpu = CpuForceLayout::new(cpu_positions, cpu_edges, self.config.clone());
+                    self.dirty = false;
+                }
+
+                let new_positions = cpu.step();
+                for (i, pos) in new_positions.iter().enumerate() {
+                    self.positions[i] = VibePos::new(pos.x as f32, pos.y as f32);
                 }
             }
         }
