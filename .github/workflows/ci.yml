@@ -120,14 +120,7 @@ jobs:
           workspaces: . -> target
       - name: Install wasm-bindgen-cli
         run: |
-          bindgen=$(cargo metadata --format-version 1 | python3 -c '
-            import sys, json
-            meta = json.load(sys.stdin)
-            for pkg in meta["packages"]:
-                if pkg["name"] == "wasm-bindgen":
-                    print(pkg["version"])
-                    break
-          ')
+          bindgen=$(cargo metadata --format-version 1 | python3 -c "import sys,json;print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='wasm-bindgen'))")
           cargo install wasm-bindgen-cli --version "$bindgen" --locked
       - name: Build UI (wasm release)
         env:
