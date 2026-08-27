@@ -187,3 +187,80 @@ fn collision_pinned_node_stays() {
         "pinned node should not move during collision resolution"
     );
 }
+
+#[test]
+fn cpu_fallback_moves_nodes() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let c = NoteId::new();
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    engine.add_node(c, false);
+    engine.set_position(&a, Position::new(0.0, 0.0));
+    engine.set_position(&b, Position::new(200.0, 0.0));
+    engine.set_position(&c, Position::new(100.0, 200.0));
+    engine.update_links(vec![
+        Link::new(a, b, LinkKind::Explicit),
+        Link::new(b, c, LinkKind::Explicit),
+    ]);
+    let pos_a_before = engine.get_position(&a).unwrap();
+    let pos_b_before = engine.get_position(&b).unwrap();
+    let pos_c_before = engine.get_position(&c).unwrap();
+    let d = engine.step();
+    assert!(d.is_finite(), "displacement should be finite: {}", d);
+    assert!(d > 0.0, "CPU fallback should move nodes");
+    assert_ne!(
+        engine.get_position(&a).unwrap(),
+        pos_a_before,
+        "node a should move"
+    );
+    assert_ne!(
+        engine.get_position(&b).unwrap(),
+        pos_b_before,
+        "node b should move"
+    );
+    assert_ne!(
+        engine.get_position(&c).unwrap(),
+        pos_c_before,
+        "node c should move"
+    );
+}
+
+#[test]
+fn cpu_fallback_converges() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let c = NoteId::new();
+    let d = NoteId::new();
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    engine.add_node(c, false);
+    engine.add_node(d, false);
+    engine.set_position(&a, Position::new(0.0, 0.0));
+    engine.set_position(&b, Position::new(300.0, 0.0));
+    engine.set_position(&c, Position::new(0.0, 300.0));
+    engine.set_position(&d, Position::new(300.0, 300.0));
+    engine.update_links(vec![
+        Link::new(a, b, LinkKind::Explicit),
+        Link::new(b, c, LinkKind::Explicit),
+        Link::new(c, d, LinkKind::Explicit),
+        Link::new(d, a, LinkKind::Explicit),
+    ]);
+    let mut prev_disp = f64::MAX;
+    let mut decreased = false;
+    for _ in 0..50 {
+        let d = engine.step();
+        if d < prev_disp {
+            decreased = true;
+        }
+        prev_disp = d;
+    }
+    assert!(decreased, "displacement should decrease over iterations");
+    assert!(
+        prev_disp < 10.0,
+        "layout should converge, final disp: {}",
+        prev_disp
+    );
+}

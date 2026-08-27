@@ -1,0 +1,55 @@
+import { Button, LineEdit } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export component TopBar inherits Rectangle {
+    height: 52px;
+    background: #F7F5F0E6;
+
+    callback new-note();
+    in property <bool> ready: false;
+
+    Text {
+        x: 20px;
+        y: 0;
+        height: parent.height;
+        vertical-alignment: center;
+        text: "Penumbra";
+        font-size: 15px;
+        font-weight: 600;
+        color: Theme.ink;
+    }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 10px;
+        width: 340px;
+        height: 32px;
+        border-radius: 8px;
+        background: Theme.ground-sunken;
+
+        LineEdit {
+            x: 4px;
+            y: 2px;
+            width: parent.width - 8px;
+            height: parent.height - 4px;
+            placeholder-text: "Quick finder";
+            enabled: false;
+        }
+    }
+
+    Button {
+        x: parent.width - self.width - 20px;
+        y: (parent.height - self.height) / 2;
+        text: "New note";
+        enabled: root.ready;
+        clicked => { root.new-note(); }
+    }
+
+    Rectangle {
+        x: 0;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.hairline;
+    }
+}

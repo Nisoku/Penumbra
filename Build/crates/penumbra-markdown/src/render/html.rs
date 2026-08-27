@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use ammonia::Builder;
 
-use crate::ast::{Block, Document, Inline, ListItem, Table, TableAlign};
+use crate::ast::{Block, BlockKind, Document, Inline, ListItem, Table, TableAlign};
 
 pub fn render_html(doc: &Document) -> String {
     let raw = render_doc(doc);
@@ -104,18 +104,18 @@ fn render_doc(doc: &Document) -> String {
 }
 
 fn render_block(block: &Block, buf: &mut String) {
-    match block {
-        Block::Paragraph(children) => {
+    match &block.kind {
+        BlockKind::Paragraph(children) => {
             buf.push_str("<p>");
             render_inlines(children, buf);
             buf.push_str("</p>\n");
         }
-        Block::Heading { level, children } => {
+        BlockKind::Heading { level, children } => {
             buf.push_str(&format!("<h{}>", level));
             render_inlines(children, buf);
             buf.push_str(&format!("</h{}>\n", level));
         }
-        Block::CodeBlock { language, text } => {
+        BlockKind::CodeBlock { language, text } => {
             if let Some(lang) = language {
                 buf.push_str(&format!(
                     "<pre><code class=\"language-{}\">{}</code></pre>\n",
@@ -126,7 +126,7 @@ fn render_block(block: &Block, buf: &mut String) {
                 buf.push_str(&format!("<pre><code>{}</code></pre>\n", escape_html(text),));
             }
         }
-        Block::List {
+        BlockKind::List {
             ordered,
             start,
             items,
@@ -149,20 +149,20 @@ fn render_block(block: &Block, buf: &mut String) {
                 buf.push_str("</ul>\n");
             }
         }
-        Block::Quote(children) => {
+        BlockKind::Quote(children) => {
             buf.push_str("<blockquote>\n");
             for child in children {
                 render_block(child, buf);
             }
             buf.push_str("</blockquote>\n");
         }
-        Block::ThematicBreak => buf.push_str("<hr>\n"),
-        Block::Table(table) => render_table(table, buf),
-        Block::HtmlBlock(html) => {
+        BlockKind::ThematicBreak => buf.push_str("<hr>\n"),
+        BlockKind::Table(table) => render_table(table, buf),
+        BlockKind::HtmlBlock(html) => {
             buf.push_str(html);
             buf.push('\n');
         }
-        Block::FootnoteDefinition { name, children } => {
+        BlockKind::FootnoteDefinition { name, children } => {
             buf.push_str(&format!(
                 "<div class=\"footnote-definition\" id=\"{}\">\n",
                 escape_html(name),
