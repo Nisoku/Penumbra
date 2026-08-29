@@ -6,6 +6,12 @@ export global Theme {
     out property<color> ink-tertiary: #98938A;
     out property<color> hairline: #1F1D1A24;
     out property<color> accent: #3D56B0;
+    out property<color> accent-soft: #3D56B01F;
+    out property<color> card-glass: #FFFFFFB8;
+    out property<color> card-highlight: #FFFFFF14;
+    out property<color> card-shadow: #1F1D1A1A;
+    out property<color> edge: #1F1D1A38;
+    out property<color> edge-selected: #3D56B073;
 }
 
 export struct BlockVM {
@@ -20,6 +26,7 @@ export struct NoteCardVM {
     title: string,
     preview: string,
     tags: string,
+    pinned: bool,
     x: length,
     y: length,
 }

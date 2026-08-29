@@ -1,15 +1,15 @@
 # Penumbra
 
-- [ ] Dioxus UI
+- [ ] Slint UI
 
-## Dioxus
+## Slint
 
-- [Dioxus](https://github.com/dioxuslabs/dioxus) for the UI <- write once (or twice since mobile) use anywhere UI
-- for motion and stuff: [dioxus-motion](https://github.com/wheregmis/dioxus-motion)
+- [Slint](https://slint.dev) for the UI <- write once (or twice since mobile) use anywhere UI. Pinned to the slint-ui/slint git rev `14c19d7` (post-#11580 wasm-wgpu + #12539 texture import fix) so a single wgpu renderer covers desktop and wasm.
+- for motion and stuff: Slint `animate` properties with `cubic-bezier` easing + `Timer`s. No separate animation crate needed >:3
 
-- [ ] Use a Spring Animation in Dioxus. When the Candle calculation finishes, just update the "Target Coordinates" and let the card smoothly drift to its new neighbors
-- [ ] Camera "Lerp" (Linear Interpolation). If the user hovers over a search result, the camera starts drifting toward it. If they move their mouse away, it drifts back.
-- [ ] Imagine the user finishes a note on the canvas, and as they hit Esc, the note card slides across the map on its own to snap next to its "relatives" using the auto-associate and link thingy.
+- [ ] Use a Spring Animation in Slint. When the Candle calculation finishes, just update the "Target Coordinates" and let the card smoothly drift to its new neighbors (animate `x`/`y` on the card toward the new layout target; overshoot ~1.03-1.05 once, per DESIGN.md)
+- [ ] Camera "Lerp" (Linear Interpolation). If the user hovers over a search result, the camera starts drifting toward it. If they move their mouse away, it drifts back. (Rust Timer driving camera `x`/`y` toward a target that resets on mouse-out)
+- [ ] Imagine the user finishes a note on the canvas, and as they hit Esc, the note card slides across the map on its own to snap next to its "relatives" using the auto-associate and link thingy. (card animates `x`/`y` toward its post-edit layout target, MapCanvas emits LayoutChanged)
 - [ ] Local layout updates only: only the affected neighborhood recalculates
   - Atomic Graph Updates: (when I have a new note get analyzed, it shouldn't update everything, it should atomically only update one area)
 - [ ] pinned notes act like fixed stars. They never move and everything else orbits around them. but like you DON'T need to have them either, natural ones via auto-linking (or manual linking) exist as well

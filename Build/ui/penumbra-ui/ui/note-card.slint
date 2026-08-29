@@ -2,46 +2,143 @@ import { Theme, NoteCardVM } from "theme.slint";
 
 export component NoteCard inherits Rectangle {
     in property <NoteCardVM> card;
+    in property <float> zoom: 1;
+    in property <bool> selected: false;
+
     callback activated(int);
+    callback note-selected(int);
+    callback note-moved(int, length, length);
+    callback note-released(int, length, length);
+    callback note-pinned(int, length, length);
+    callback note-unpinned(int);
+
+    property <bool> dragging: false;
+    property <bool> right-dragging: false;
+    property <length> grab-offset-x: 0px;
+    property <length> grab-offset-y: 0px;
+    property <length> last-x: 0px;
+    property <length> last-y: 0px;
 
     x: card.x;
     y: card.y;
     width: 180px;
     height: 120px;
-    border-radius: 6px;
-    background: Theme.ground-sunken;
+    clip: true;
+    border-radius: 14px;
     border-width: 1px;
-    border-color: Theme.hairline;
+    border-color: root.selected ? Theme.accent : Theme.hairline;
+    drop-shadow-offset-x: 0px;
+    drop-shadow-offset-y: 2px;
+    drop-shadow-blur: 16px;
+    drop-shadow-color: Theme.card-shadow;
+    transform-scale-x: root.dragging || root.right-dragging ? 103% : 100%;
+    transform-scale-y: root.dragging || root.right-dragging ? 103% : 100%;
+    animate transform-scale-x { duration: 600ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    animate transform-scale-y { duration: 600ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+    base := Rectangle {
+        border-radius: 14px;
+        background: Theme.ground-sunken;
+    }
+
+    glass := Rectangle {
+        border-radius: 14px;
+        background: Theme.card-glass;
+        opacity: root.dragging || root.right-dragging ? 0.86 : 1.0;
+        animate opacity { duration: 120ms; easing: ease-out; }
+    }
+
+    Rectangle {
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: Theme.card-highlight;
+    }
+
+    if root.selected: Rectangle {
+        border-radius: 14px;
+        background: Theme.accent-soft;
+    }
 
     VerticalLayout {
-        padding: 12px;
-        spacing: 6px;
+        padding: 16px;
+        spacing: 4px;
 
         Text {
-            text: card.title;
-            font-size: 14px;
+            text: root.card.title;
+            font-size: 13px;
             font-weight: 600;
             color: Theme.ink;
             overflow: elide;
         }
 
-        Text {
-            text: card.preview;
+        if root.zoom >= 0.55: Text {
+            text: root.card.preview;
             font-size: 12px;
             color: Theme.ink-secondary;
             wrap: TextWrap.word-wrap;
             overflow: elide;
         }
 
-        if card.tags != "": Text {
-            text: card.tags;
+        if root.zoom >= 0.55 && root.card.tags != "": Text {
+            text: root.card.tags;
             font-size: 10px;
             color: Theme.ink-tertiary;
             overflow: elide;
         }
     }
 
-    TouchArea {
-        clicked => { root.activated(root.card.id); }
+    if root.card.pinned: Rectangle {
+        x: parent.width - 16px;
+        y: 8px;
+        width: 8px;
+        height: 8px;
+        border-radius: 4px;
+        background: Theme.accent;
+    }
+
+    ta := TouchArea {
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                if (event.button == PointerEventButton.left) {
+                    root.dragging = true;
+                    root.grab-offset-x = ta.pressed-x;
+                    root.grab-offset-y = ta.pressed-y;
+                    root.last-x = root.card.x;
+                    root.last-y = root.card.y;
+                    root.note-selected(root.card.id);
+                } else if (event.button == PointerEventButton.right) {
+                    root.right-dragging = true;
+                    root.grab-offset-x = ta.pressed-x;
+                    root.grab-offset-y = ta.pressed-y;
+                    root.last-x = root.card.x;
+                    root.last-y = root.card.y;
+                }
+            } else if (event.kind == PointerEventKind.up) {
+                if (root.dragging) {
+                    root.dragging = false;
+                    root.note-released(root.card.id, root.last-x, root.last-y);
+                } else if (root.right-dragging) {
+                    root.right-dragging = false;
+                    let moved-by = root.grab-offset-x - ta.mouse-x;
+                    let moved-by-y = root.grab-offset-y - ta.mouse-y;
+                    if (moved-by.abs() >= 4px || moved-by-y.abs() >= 4px) {
+                        root.note-pinned(root.card.id, root.last-x, root.last-y);
+                    } else {
+                        root.note-unpinned(root.card.id);
+                    }
+                }
+            }
+        }
+
+        moved => {
+            if (root.dragging || root.right-dragging) {
+                root.last-x = root.card.x + (ta.mouse-x - root.grab-offset-x);
+                root.last-y = root.card.y + (ta.mouse-y - root.grab-offset-y);
+                root.note-moved(root.card.id, root.last-x, root.last-y);
+            }
+        }
+
+        double-clicked => { root.activated(root.card.id); }
     }
 }

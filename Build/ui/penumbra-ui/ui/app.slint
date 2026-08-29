@@ -1,4 +1,4 @@
-import { Theme, BlockVM, NoteCardVM, EdgeVM } from "theme.slint";
+import { Theme, BlockVM, NoteCardVM } from "theme.slint";
 import { TopBar } from "top-bar.slint";
 import { MapCanvas } from "map-canvas.slint";
 import { EditorPanel } from "editor-panel.slint";
@@ -13,13 +13,25 @@ export component AppWindow inherits Window {
     in property <string> status: "opening universe";
     in property <bool> ready: false;
     in property <[NoteCardVM]> note-cards: [];
-    in property <[EdgeVM]> edges: [];
+    in property <string> grid-path: "";
+    in property <string> edge-path: "";
+    in property <string> selected-edge-path: "";
+    in-out property <length> camera-x: 0px;
+    in-out property <length> camera-y: 0px;
+    in-out property <float> zoom: 1;
+    in-out property <int> selected-note: -1;
     in property <[BlockVM]> editor-blocks: [];
     in property <bool> editor-open: false;
     callback open-editor(int);
     callback close-editor();
     callback editor-text-changed(int, string);
     callback open-note(int);
+    callback camera-changed(length, length, float);
+    callback note-selected(int);
+    callback note-moved(int, length, length);
+    callback note-released(int, length, length);
+    callback note-pinned(int, length, length);
+    callback note-unpinned(int);
 
     TopBar {
         x: 0;
@@ -36,8 +48,20 @@ export component AppWindow inherits Window {
         height: parent.height - 52px;
         status: root.status;
         note-cards: root.note-cards;
-        edges: root.edges;
+        grid-path: root.grid-path;
+        edge-path: root.edge-path;
+        selected-edge-path: root.selected-edge-path;
+        camera-x <=> root.camera-x;
+        camera-y <=> root.camera-y;
+        zoom <=> root.zoom;
+        selected-note <=> root.selected-note;
         open-note(id) => { root.open-note(id); }
+        camera-changed(cx, cy, z) => { root.camera-changed(cx, cy, z); }
+        note-selected(id) => { root.note-selected(id); }
+        note-moved(id, wx, wy) => { root.note-moved(id, wx, wy); }
+        note-released(id, wx, wy) => { root.note-released(id, wx, wy); }
+        note-pinned(id, wx, wy) => { root.note-pinned(id, wx, wy); }
+        note-unpinned(id) => { root.note-unpinned(id); }
     }
 
     EditorPanel {

@@ -264,3 +264,112 @@ fn cpu_fallback_converges() {
         prev_disp
     );
 }
+
+#[test]
+fn step_neighborhood_moves_local_nodes_only() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    // Two widely separated clusters; a neighborhood step on the left cluster
+    // must not move the far right node.
+    let left = NoteId::new();
+    let near_left = NoteId::new();
+    let far = NoteId::new();
+
+    engine.add_node(left, false);
+    engine.add_node(near_left, false);
+    engine.add_node(far, false);
+
+    // Default neighborhood radius is 400; the far node sits 5000 away so it
+    // is well outside any local scope.
+    engine.set_position(&left, Position::new(0.0, 0.0));
+    engine.set_position(&near_left, Position::new(30.0, 0.0));
+    engine.set_position(&far, Position::new(5000.0, 5000.0));
+
+    engine.update_links(vec![Link::new(left, near_left, LinkKind::Explicit)]);
+
+    let far_before = engine.get_position(&far).unwrap();
+    let left_before = engine.get_position(&left).unwrap();
+
+    let d = engine.step_neighborhood(&left);
+    assert!(d.is_finite(), "displacement should be finite: {d}");
+
+    let far_after = engine.get_position(&far).unwrap();
+    let left_after = engine.get_position(&left).unwrap();
+
+    // The far node is an anchor outside the neighborhood and must not move.
+    assert_eq!(
+        far_after, far_before,
+        "distant node must not move during a neighborhood step"
+    );
+    // The center node should have been integrated.
+    assert_ne!(
+        left_after, left_before,
+        "center node should move during a neighborhood step"
+    );
+}
+
+#[test]
+fn step_neighborhood_unknown_id_is_safe() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(NoteId::new(), false);
+    let d = engine.step_neighborhood(&NoteId::new());
+    assert_eq!(d, 0.0, "unknown node id yields zero displacement");
+}
+
+#[test]
+fn step_neighborhood_resolves_local_collision() {
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    // Coincident so they overlap; both within the neighborhood of a.
+    engine.set_position(&a, Position::new(100.0, 100.0));
+    engine.set_position(&b, Position::new(100.0, 100.0));
+    engine.set_node_bounds(a, Bounds::new(100.0, 60.0));
+    engine.set_node_bounds(b, Bounds::new(100.0, 60.0));
+
+    let _d = engine.step_neighborhood(&a);
+
+    let pa = engine.get_position(&a).unwrap();
+    let pb = engine.get_position(&b).unwrap();
+    let dist = pa.distance_to(&pb);
+    assert!(
+        dist > 10.0,
+        "nodes only {dist} apart after neighborhood resolve"
+    );
+}
+
+#[test]
+fn step_neighborhood_leaves_distant_cluster_untouched() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    let mut ids = Vec::new();
+    // A dense left cluster.
+    for i in 0..20 {
+        let id = NoteId::new();
+        engine.add_node(id, false);
+        engine.set_position(&id, Position::new(i as f64 * 10.0, 0.0));
+        ids.push(id);
+    }
+    // A far away cluster.
+    let mut far_ids = Vec::new();
+    for i in 0..5 {
+        let id = NoteId::new();
+        engine.add_node(id, false);
+        engine.set_position(&id, Position::new(i as f64 * 10.0 + 1.0e6, 1.0e6));
+        far_ids.push(id);
+    }
+    let far_before: Vec<Position> = far_ids
+        .iter()
+        .map(|id| engine.get_position(id).unwrap())
+        .collect();
+
+    let _d = engine.step_neighborhood(&ids[0]);
+
+    for (id, before) in far_ids.iter().zip(far_before.iter()) {
+        assert_eq!(
+            engine.get_position(id).unwrap(),
+            *before,
+            "far cluster nodes must be anchors"
+        );
+    }
+}

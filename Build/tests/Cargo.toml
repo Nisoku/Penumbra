@@ -36,3 +36,6 @@ tokenizers = { version = "0.23.1", optional = true, default-features = false, fe
 candle-core = { version = "0.10.2", optional = true, default-features = false }
 candle-nn = { version = "0.10.2", optional = true }
 wiremock = "0.6"
+
+[dev-dependencies]
+penumbra-ui = { path = "../ui/penumbra-ui" }

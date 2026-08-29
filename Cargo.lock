@@ -4897,6 +4897,7 @@ dependencies = [
  "penumbra-search",
  "penumbra-storage",
  "penumbra-sync",
+ "penumbra-ui",
  "pollster",
  "serde_json",
  "tempfile",

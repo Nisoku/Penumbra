@@ -9,7 +9,7 @@ use vibe_graph_layout_gpu::{
     Edge as VibeEdge, GpuLayout, LayoutConfig as GpuConfig, Position as VibePos,
 };
 
-use cpu::CpuForceLayout;
+use cpu::{CpuForceLayout, SpatialHash};
 
 /// Configuration for the GPU-accelerated layout engine.
 #[derive(Debug, Clone)]
@@ -29,6 +29,8 @@ pub struct LayoutConfig {
     pub max_collision_push: f64,
     /// Number of iterative passes for collision resolution.
     pub collision_passes: usize,
+    /// Geographic radius (pixels) of a neighborhood for `step_neighborhood`.
+    pub neighborhood_radius: f64,
 }
 
 impl Default for LayoutConfig {
@@ -46,6 +48,7 @@ impl Default for LayoutConfig {
             collision_margin: 10.0,
             max_collision_push: 20.0,
             collision_passes: 5,
+            neighborhood_radius: 400.0,
         }
     }
 }
@@ -344,10 +347,100 @@ impl LayoutEngine {
 
     /// Incremental step that moves only the neighborhood of a given node.
     ///
-    /// Note: with GPU acceleration the full graph is always computed, so this
-    /// is functionally equivalent to `step()`.
-    pub fn step_neighborhood(&mut self, _id: &NoteId) -> f64 {
-        self.step()
+    /// The neighborhood is the set of nodes within `neighborhood_radius` of
+    /// `id`, plus any spring partners of those nodes (which act as anchors).
+    pub fn step_neighborhood(&mut self, id: &NoteId) -> f64 {
+        let Some(&center_u32) = self.index_map.get(id) else {
+            return 0.0;
+        };
+        let center = center_u32 as usize;
+        if self.nodes.is_empty() {
+            self.iteration += 1;
+            return 0.0;
+        }
+
+        let radius = self.config.neighborhood_radius;
+
+        let old_positions: Vec<VibePos> = self.positions.clone();
+
+        // Re-sync the CPU layout from engine positions so forces stay
+        // continuous with prior steps, then run the localized pass.
+        let moved = {
+            let cpu = self.cpu.get_or_insert_with(|| {
+                CpuForceLayout::new(
+                    self.positions
+                        .iter()
+                        .map(|p| Position::new(p.x as f64, p.y as f64))
+                        .collect(),
+                    self.edges
+                        .iter()
+                        .map(|e| (e.source as usize, e.target as usize))
+                        .collect(),
+                    self.config.clone(),
+                )
+            });
+            let start = cpu.positions().len();
+            if start != self.positions.len() {
+                // Graph structure changed since the last rebuild; reconstruct.
+                *cpu = CpuForceLayout::new(
+                    self.positions
+                        .iter()
+                        .map(|p| Position::new(p.x as f64, p.y as f64))
+                        .collect(),
+                    self.edges
+                        .iter()
+                        .map(|e| (e.source as usize, e.target as usize))
+                        .collect(),
+                    self.config.clone(),
+                );
+            }
+            cpu.step_neighborhood(center, radius)
+        };
+
+        // Copy the moved nodes back into the engine position store.
+        for &i in &moved {
+            let p = self
+                .cpu
+                .as_ref()
+                .expect("cpu layout exists in this branch")
+                .positions()[i];
+            self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
+        }
+
+        // Restore pinned nodes within the neighborhood.
+        for (pid, pin_pos) in &self.pinned {
+            if let Some(&idx) = self.index_map.get(pid) {
+                if moved.contains(&(idx as usize)) {
+                    self.positions[idx as usize] = *pin_pos;
+                }
+            }
+        }
+
+        // Neighborhood-scoped collision resolution (spatial hash, local cell).
+        self.resolve_collisions_neighborhood(center, radius);
+
+        // Average displacement of the moved, non-pinned nodes.
+        let mut total_disp = 0.0f64;
+        let mut count = 0u32;
+        for &i in &moved {
+            let nid = self.nodes[i];
+            if self.pinned.contains_key(&nid) {
+                continue;
+            }
+            let old = &old_positions[i];
+            let new = &self.positions[i];
+            let dx = new.x as f64 - old.x as f64;
+            let dy = new.y as f64 - old.y as f64;
+            total_disp += (dx * dx + dy * dy).sqrt();
+            count += 1;
+        }
+
+        self.iteration += 1;
+        if count == 0 {
+            0.0
+        } else {
+            total_disp / count as f64
+        }
     }
 
     /// Push apart overlapping node bounding boxes.
@@ -368,19 +461,37 @@ impl LayoutEngine {
             .map(|p| Position::new(p.x as f64, p.y as f64))
             .collect();
 
+        // The search radius must span the widest possible overlapping pair:
+        // two nodes at their max half-diagonal separation, plus the margin.
+        let mut max_half_diag = 0.0f64;
+        for bounds in self.node_bounds.values() {
+            let half_diag =
+                (bounds.width * bounds.width + bounds.height * bounds.height).sqrt() * 0.5;
+            max_half_diag = max_half_diag.max(half_diag);
+        }
+        let search_radius = max_half_diag * 2.0 + margin;
+
         for _pass in 0..passes {
             let mut any_resolved = false;
+            // Rebuild the index each pass so recently pushed nodes are found
+            // in their new cells on the next iteration.
+            let hash = SpatialHash::new(search_radius, pos_f64.clone());
 
             for i in 0..self.nodes.len() {
-                // Pinned nodes never move from collision push.
                 if self.pinned.contains_key(&self.nodes[i]) {
                     continue;
                 }
                 let Some(bounds_i) = self.node_bounds.get(&self.nodes[i]) else {
                     continue;
                 };
+                let a = pos_f64[i];
+                let center_a =
+                    Position::new(a.x + bounds_i.width * 0.5, a.y + bounds_i.height * 0.5);
 
-                for j in (i + 1)..self.nodes.len() {
+                for j in hash.within(center_a, search_radius) {
+                    if j <= i {
+                        continue;
+                    }
                     if self.pinned.contains_key(&self.nodes[j]) {
                         continue;
                     }
@@ -388,7 +499,6 @@ impl LayoutEngine {
                         continue;
                     };
 
-                    let a = pos_f64[i];
                     let b = pos_f64[j];
 
                     if !bounds_i.overlaps(&a, bounds_j, &b) {
@@ -448,6 +558,130 @@ impl LayoutEngine {
         // Write back to the GPU positions.
         for (i, p) in pos_f64.iter().enumerate() {
             self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
+        }
+    }
+
+    /// Push apart overlapping bounding boxes among nodes near a center.
+    fn resolve_collisions_neighborhood(&mut self, center: usize, radius: f64) {
+        let margin = self.config.collision_margin;
+        let max_push = self.config.max_collision_push;
+        let passes = self.config.collision_passes;
+
+        let mut max_half_diag = 0.0f64;
+        for bounds in self.node_bounds.values() {
+            let half_diag =
+                (bounds.width * bounds.width + bounds.height * bounds.height).sqrt() * 0.5;
+            max_half_diag = max_half_diag.max(half_diag);
+        }
+        let search_radius = max_half_diag * 2.0 + margin;
+
+        // The spatial hash cell covers the search radius around the center so
+        // the neighborhood query includes the anchor ring of overlapping nodes.
+        let mut pos_f64: Vec<Position> = self
+            .positions
+            .iter()
+            .map(|p| Position::new(p.x as f64, p.y as f64))
+            .collect();
+        let center_pos = pos_f64[center];
+        let initial_hash = SpatialHash::new(search_radius, pos_f64.clone());
+        let neighborhood: std::collections::HashSet<usize> = initial_hash
+            .within(center_pos, radius + search_radius)
+            .into_iter()
+            .collect();
+
+        for _pass in 0..passes {
+            let mut any_resolved = false;
+            let hash = SpatialHash::new(search_radius, pos_f64.clone());
+            let mut neighbors: Vec<usize> = hash.within(center_pos, radius + search_radius);
+            neighbors.sort_unstable();
+            neighbors.dedup();
+
+            for &i in &neighbors {
+                if !neighborhood.contains(&i) {
+                    continue;
+                }
+                if self.pinned.contains_key(&self.nodes[i]) {
+                    continue;
+                }
+                let Some(bounds_i) = self.node_bounds.get(&self.nodes[i]) else {
+                    continue;
+                };
+                let a = pos_f64[i];
+                let center_a =
+                    Position::new(a.x + bounds_i.width * 0.5, a.y + bounds_i.height * 0.5);
+
+                for j in hash.within(center_a, search_radius) {
+                    if j <= i {
+                        continue;
+                    }
+                    if self.pinned.contains_key(&self.nodes[j]) {
+                        continue;
+                    }
+                    let Some(bounds_j) = self.node_bounds.get(&self.nodes[j]) else {
+                        continue;
+                    };
+                    let b = pos_f64[j];
+
+                    if !bounds_i.overlaps(&a, bounds_j, &b) {
+                        continue;
+                    }
+
+                    let ca_x = a.x + bounds_i.width * 0.5;
+                    let ca_y = a.y + bounds_i.height * 0.5;
+                    let cb_x = b.x + bounds_j.width * 0.5;
+                    let cb_y = b.y + bounds_j.height * 0.5;
+
+                    let dx = cb_x - ca_x;
+                    let dy = cb_y - ca_y;
+                    let dist = (dx * dx + dy * dy).sqrt();
+
+                    let (nx, ny) = if dist < 1e-6 {
+                        let angle = (i * 2654435761 + j * 2246822519) as f64;
+                        (angle.cos(), angle.sin())
+                    } else {
+                        (dx / dist, dy / dist)
+                    };
+
+                    let half_diag_i = (bounds_i.width * bounds_i.width
+                        + bounds_i.height * bounds_i.height)
+                        .sqrt()
+                        * 0.5;
+                    let half_diag_j = (bounds_j.width * bounds_j.width
+                        + bounds_j.height * bounds_j.height)
+                        .sqrt()
+                        * 0.5;
+                    let target = half_diag_i + half_diag_j + margin;
+
+                    if dist >= target {
+                        continue;
+                    }
+
+                    let push = ((target - dist) * 0.5).min(max_push);
+
+                    if neighborhood.contains(&j) {
+                        pos_f64[i].x -= nx * push;
+                        pos_f64[i].y -= ny * push;
+                        pos_f64[j].x += nx * push;
+                        pos_f64[j].y += ny * push;
+                    } else {
+                        // j is an anchor outside the neighborhood; only i moves.
+                        pos_f64[i].x -= nx * push * 2.0;
+                        pos_f64[i].y -= ny * push * 2.0;
+                    }
+
+                    any_resolved = true;
+                }
+            }
+
+            if !any_resolved {
+                break;
+            }
+        }
+
+        for (i, p) in pos_f64.iter().enumerate() {
+            if neighborhood.contains(&i) {
+                self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
+            }
         }
     }
 

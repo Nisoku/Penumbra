@@ -1,4 +1,4 @@
-import { Theme, NoteCardVM, EdgeVM } from "theme.slint";
+import { Theme, NoteCardVM } from "theme.slint";
 import { NoteCard } from "note-card.slint";
 
 export component MapCanvas inherits Rectangle {
@@ -7,18 +7,61 @@ export component MapCanvas inherits Rectangle {
 
     in property <string> status: "";
     in property <[NoteCardVM]> note-cards: [];
-    in property <[EdgeVM]> edges: [];
-    callback open-note(int);
-
+    in property <string> grid-path: "";
+    in property <string> edge-path: "";
+    in property <string> selected-edge-path: "";
     in-out property <length> camera-x: 0px;
     in-out property <length> camera-y: 0px;
     in-out property <float> zoom: 1;
+    in-out property <int> selected-note: -1;
+    callback camera-changed(length, length, float);
+    callback note-selected(int);
+    callback note-moved(int, length, length);
+    callback note-released(int, length, length);
+    callback note-pinned(int, length, length);
+    callback note-unpinned(int);
+    callback open-note(int);
 
     property <bool> dragging: false;
     property <length> drag-start-x: 0px;
     property <length> drag-start-y: 0px;
     property <length> cam-start-x: 0px;
     property <length> cam-start-y: 0px;
+    property <float> grid-opacity:
+        root.zoom >= 2.5 ? 0.0 : (root.zoom < 0.4 ? root.zoom / 0.4 : 1.0);
+
+    grid := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.grid-path;
+        stroke: Theme.hairline;
+        stroke-width: 1px;
+        opacity: root.grid-opacity;
+    }
+
+    edge-layer := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.edge-path;
+        stroke: Theme.edge;
+        stroke-width: 1px;
+        stroke-line-cap: round;
+    }
+
+    selected-edge-layer := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.selected-edge-path;
+        stroke: Theme.edge-selected;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
 
     ta := TouchArea {
         width: 100%;
@@ -26,11 +69,18 @@ export component MapCanvas inherits Rectangle {
 
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
+                if (event.button != PointerEventButton.left) {
+                    return;
+                }
                 root.dragging = true;
                 root.drag-start-x = ta.pressed-x;
                 root.drag-start-y = ta.pressed-y;
                 root.cam-start-x = root.camera-x;
                 root.cam-start-y = root.camera-y;
+                if (root.selected-note != -1) {
+                    root.selected-note = -1;
+                    root.note-selected(-1);
+                }
             } else if (event.kind == PointerEventKind.up) {
                 root.dragging = false;
             }
@@ -40,27 +90,36 @@ export component MapCanvas inherits Rectangle {
             if (root.dragging) {
                 root.camera-x = root.cam-start-x + (ta.mouse-x - root.drag-start-x);
                 root.camera-y = root.cam-start-y + (ta.mouse-y - root.drag-start-y);
+                root.camera-changed(root.camera-x, root.camera-y, root.zoom);
             }
         }
 
         scroll-event(event) => {
-            if (event.delta-y > 0px) {
-                root.zoom = Math.max(0.1, Math.min(5.0, root.zoom * 1.1));
-            } else if (event.delta-y < 0px) {
-                root.zoom = Math.max(0.1, Math.min(5.0, root.zoom / 1.1));
-            }
+            let old-zoom = root.zoom;
+            let new-zoom = Math.max(0.1, Math.min(5.0, old-zoom * (event.delta-y > 0px ? 1.1 : 1 / 1.1)));
+            root.camera-x = ta.mouse-x - (ta.mouse-x - root.camera-x) / old-zoom * new-zoom;
+            root.camera-y = ta.mouse-y - (ta.mouse-y - root.camera-y) / old-zoom * new-zoom;
+            root.zoom = new-zoom;
+            root.camera-changed(root.camera-x, root.camera-y, root.zoom);
             accept
         }
     }
 
     for card in root.note-cards: NoteCard {
-        visible: card.x * root.zoom - root.camera-x > -200px
-            && card.x * root.zoom - root.camera-x < root.width + 200px
-            && card.y * root.zoom - root.camera-y > -200px
-            && card.y * root.zoom - root.camera-y < root.height + 200px;
+        visible: (card.x - root.camera-x) * root.zoom > -220px
+            && (card.x - root.camera-x) * root.zoom < root.width + 220px
+            && (card.y - root.camera-y) * root.zoom > -220px
+            && (card.y - root.camera-y) * root.zoom < root.height + 220px;
         x: (card.x - root.camera-x) * root.zoom;
         y: (card.y - root.camera-y) * root.zoom;
         card: card;
+        zoom: root.zoom;
+        selected: root.selected-note == card.id;
+        note-selected(id) => { root.note-selected(id); }
+        note-moved(id, wx, wy) => { root.note-moved(id, wx, wy); }
+        note-released(id, wx, wy) => { root.note-released(id, wx, wy); }
+        note-pinned(id, wx, wy) => { root.note-pinned(id, wx, wy); }
+        note-unpinned(id) => { root.note-unpinned(id); }
         activated(id) => { root.open-note(id); }
     }
 

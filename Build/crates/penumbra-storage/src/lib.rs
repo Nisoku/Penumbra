@@ -3,6 +3,7 @@
 mod filename;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use futures::StreamExt;
@@ -21,6 +22,7 @@ use penumbra_markdown::parser::parse_document;
 const APP_SUBDIR: &str = "Penumbra";
 const STATE_DIR: &str = ".penumbra";
 const WORKSPACE_FILE: &str = "workspace.json";
+const PINS_FILE: &str = "workspace.pins.json";
 const NOTE_EXTENSION: &str = ".md";
 
 /// A note as loaded from the vault, with the bookkeeping needed to write
@@ -261,6 +263,24 @@ impl Storage {
         Ok(Some(serde_json::from_slice(&data)?))
     }
 
+    pub async fn save_pins(&self, pins: &HashSet<NoteId>) -> Result<()> {
+        let mut file = self.pins_file(true).await?;
+        let json = serde_json::to_string_pretty(pins)?;
+        self.write_all(&mut file, json.into_bytes()).await
+    }
+
+    pub async fn load_pins(&self) -> Result<Option<HashSet<NoteId>>> {
+        let file = match self.pins_file(false).await {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+        let data = self.read_all(&file).await?;
+        if data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(serde_json::from_slice(&data)?))
+    }
+
     // Internals
 
     async fn read_note_file(&self, stem: &str) -> Result<StoredNote> {
@@ -320,14 +340,22 @@ impl Storage {
     }
 
     async fn workspace_file(&self, create: bool) -> Result<FileHandle> {
+        self.state_file(WORKSPACE_FILE, create).await
+    }
+
+    async fn pins_file(&self, create: bool) -> Result<FileHandle> {
+        self.state_file(PINS_FILE, create).await
+    }
+
+    async fn state_file(&self, name: &str, create: bool) -> Result<FileHandle> {
         let dir = self
             .root
             .get_directory_handle_with_options(STATE_DIR, &GetDirectoryHandleOptions { create })
             .await
             .map_err(|e| PenumbraError::Storage(format!("state dir: {e:?}")))?;
-        dir.get_file_handle_with_options(WORKSPACE_FILE, &GetFileHandleOptions { create })
+        dir.get_file_handle_with_options(name, &GetFileHandleOptions { create })
             .await
-            .map_err(|e| PenumbraError::Storage(format!("workspace file: {e:?}")))
+            .map_err(|e| PenumbraError::Storage(format!("state file: {e:?}")))
     }
 
     async fn delete_file(&self, stem: &str) -> Result<()> {
