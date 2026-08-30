@@ -25,6 +25,7 @@ export component AppWindow inherits Window {
     in property <bool> editor-open: false;
     in property <string> editor-title: "";
     in property <int> editor-focus-id: -1;
+    in-out property <length> editor-scroll-y: 0px;
     callback open-editor(int);
     callback close-editor();
     callback editor-text-changed(int, string);
@@ -73,13 +74,15 @@ export component AppWindow inherits Window {
     }
 
     EditorPanel {
-        y: 52px;
+        x: 0px;
+        y: 0px;
         width: root.width;
-        height: root.height - 52px;
+        height: root.height;
         blocks: root.editor-blocks;
         open: root.editor-open;
         note-title: root.editor-title;
         focus-id: root.editor-focus-id;
+        editor-scroll-y <=> root.editor-scroll-y;
         open-block(id) => { root.open-editor(id); }
         close => { root.close-editor(); }
         text-changed(id, text) => { root.editor-text-changed(id, text); }
@@ -102,9 +105,9 @@ export component AppWindow inherits Window {
 
     FocusScope {
         x: 0;
-        y: 52px;
+        y: 0;
         width: parent.width;
-        height: parent.height - 52px;
+        height: parent.height;
         enabled: root.editor-open;
 
         key-pressed(event) => {

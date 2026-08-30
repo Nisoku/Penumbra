@@ -2,6 +2,8 @@ use crate::NoteCardVM;
 
 pub const GRID_SPACING: f32 = 120.0;
 pub const CARD_READING_ZOOM: f32 = 1.8;
+const CARD_W: f32 = 180.0;
+const MAX_ZOOM: f32 = 8.0;
 const VIEWPORT_MARGIN: f32 = 40.0;
 const CURVE_BEND: f32 = 0.18;
 const MIN_BEND_PX: f32 = 8.0;
@@ -76,6 +78,15 @@ pub fn frame_card(card_x: f32, card_y: f32, view_w: f32, view_h: f32) -> MapCame
         x: card_x - view_w / CARD_READING_ZOOM * 0.5,
         y: card_y - view_h / CARD_READING_ZOOM * 0.38,
         zoom: CARD_READING_ZOOM,
+    }
+}
+
+pub fn zoom_card(card_x: f32, card_y: f32, view_w: f32, view_h: f32) -> MapCamera {
+    let zoom = (view_w / CARD_W).clamp(CARD_READING_ZOOM, MAX_ZOOM);
+    MapCamera {
+        x: card_x - view_w / zoom * 0.5,
+        y: card_y - view_h / zoom * 0.5,
+        zoom,
     }
 }
 

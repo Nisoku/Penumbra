@@ -1,3 +1,4 @@
+pub mod display;
 pub mod map;
 mod platform;
 
@@ -18,8 +19,7 @@ use penumbra_core::note::Note;
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
 use penumbra_core::EmbeddingProvider;
-use penumbra_editor::doc::BlockKind;
-use penumbra_editor::session::{BlockEdit, EditorSession};
+use penumbra_editor::session::EditorSession;
 use penumbra_embed::SimpleEmbedder;
 use penumbra_index::VectorIndex;
 use penumbra_layout::LayoutEngine;
@@ -43,6 +43,7 @@ const TOP_BAR_HEIGHT: f32 = 52.0;
 const DRIFT_DURATION: Duration = Duration::from_millis(600);
 const DRIFT_TICK: Duration = Duration::from_millis(16);
 const GLIDE_DURATION: Duration = Duration::from_millis(450);
+const OPEN_ZOOM_DURATION: Duration = Duration::from_millis(520);
 const GLIDE_TICK: Duration = Duration::from_millis(16);
 const GLIDE_EPSILON: f32 = 0.5;
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
@@ -64,6 +65,7 @@ struct SharedState {
     edit_pending: AtomicI32,
     glide: Mutex<Option<CameraGlide>>,
     editor_prev_camera: Mutex<Option<MapCamera>>,
+    editor_reveal: AtomicBool,
     embedder: Mutex<Option<Arc<dyn EmbeddingProvider>>>,
     linker: Mutex<Option<Arc<AutoLinker>>>,
 }
@@ -109,6 +111,7 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         edit_pending: AtomicI32::new(0),
         glide: Mutex::new(None),
         editor_prev_camera: Mutex::new(None),
+        editor_reveal: AtomicBool::new(false),
         embedder: Mutex::new(None),
         linker: Mutex::new(None),
     });
@@ -358,18 +361,61 @@ fn wire_open_note(ui: &AppWindow, state: &Rc<SharedState>) {
     ui.on_open_note(move |card_id| {
         let state_outer = Rc::clone(&state);
         let state_task = Rc::clone(&state_outer);
+        start_open_zoom(&state_outer, &handle, card_id);
         let ui = handle.clone();
         platform::spawn(async move {
             let Some((note_id, title, body)) = load_note_for_editor(&state_task, card_id).await
             else {
                 set_status(&ui, "note not found");
+                cancel_open_zoom(&state_task);
                 return;
             };
             if let Some(ui) = ui.upgrade() {
-                begin_editor_session(&state_task, &ui, note_id, title, body, card_id);
+                prepare_editor_session(&state_task, &ui, note_id, title, body);
             }
         });
     });
+}
+
+/// Begin the zoom-into-card
+fn start_open_zoom(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, card_id: i32) {
+    let Some(ui) = ui.upgrade() else {
+        return;
+    };
+    let cards = state.cards.lock().unwrap();
+    let Some(card) = cards.iter().find(|card| card.id == card_id) else {
+        return;
+    };
+    let (view_w, view_h) = viewport_size(&ui);
+    let target = map::zoom_card(card.x, card.y, view_w, view_h);
+    drop(cards);
+    let from = MapCamera {
+        x: ui.get_camera_x(),
+        y: ui.get_camera_y(),
+        zoom: ui.get_zoom(),
+    };
+    *state.editor_prev_camera.lock().unwrap() = Some(from);
+    state.editor_reveal.store(true, Ordering::Relaxed);
+    start_glide(state, &ui, target, OPEN_ZOOM_DURATION);
+}
+
+/// Abort a zoom-in that will not be followed by an editor reveal (for
+/// example when the note failed to load).
+fn cancel_open_zoom(state: &SharedState) {
+    state.editor_reveal.store(false, Ordering::Relaxed);
+    cancel_camera_glide(state);
+}
+
+/// Reveal the editor once its zoom flight has settled and its session exists.
+fn maybe_reveal_editor(state: &SharedState, ui: &AppWindow) {
+    if !state.editor_reveal.load(Ordering::Relaxed) {
+        return;
+    }
+    let has_session = state.editor.lock().unwrap().is_some();
+    if has_session {
+        state.editor_reveal.store(false, Ordering::Relaxed);
+        ui.set_editor_open(true);
+    }
 }
 
 fn wire_new_note(ui: &AppWindow, state: &Rc<SharedState>) {
@@ -431,105 +477,72 @@ fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
     let Some(session) = guard.as_ref() else {
         return;
     };
+    let blocks = session.blocks();
     let active = session.active();
-    let blocks: Vec<BlockVM> = session
-        .blocks()
+    let vm: Vec<BlockVM> = blocks
         .iter()
         .enumerate()
         .map(|(idx, block)| BlockVM {
             id: idx as i32,
-            text: block_display_text(block).into(),
+            text: display::display_text(block).into(),
             edit_text: block.text.as_str().into(),
             is_active: idx == active,
-            kind: block_kind_name(&block.kind).into(),
-            level: block_heading_level(block) as i32,
+            kind: display::kind_name(&block.kind).into(),
+            level: display::heading_level(block) as i32,
+            language: display::code_language(block).into(),
         })
         .collect();
+    let target_y =
+        display::scroll_target_y(blocks, active, editor_column_px(ui), editor_body_px(ui));
     drop(guard);
-    ui.set_editor_blocks(slint::ModelRc::new(slint::VecModel::from(blocks)));
+    ui.set_editor_blocks(slint::ModelRc::new(slint::VecModel::from(vm)));
     ui.set_editor_focus_id(active as i32);
+    scroll_editor_to_active(ui, target_y);
 }
 
-fn block_kind_name(kind: &BlockKind) -> &'static str {
-    match kind {
-        BlockKind::Paragraph(_) => "paragraph",
-        BlockKind::Heading { .. } => "heading",
-        BlockKind::Quote(_) => "quote",
-        BlockKind::List { .. } => "list",
-        BlockKind::CodeBlock { .. } => "code",
-        BlockKind::ThematicBreak => "break",
-        BlockKind::Table(_) => "table",
-        BlockKind::HtmlBlock(_) => "html",
-        BlockKind::FootnoteDefinition { .. } => "footnote",
-    }
+/// Width available to block text inside the editor body column, matching the
+/// centered measure and its horizontal padding.
+fn editor_column_px(ui: &AppWindow) -> f32 {
+    let (win_w, _) = viewport_size(ui);
+    let measure = (win_w - 96.0).min(720.0);
+    (measure - 64.0).max(120.0)
 }
 
-fn block_heading_level(block: &BlockEdit) -> u8 {
-    match &block.kind {
-        BlockKind::Heading { level, .. } => *level,
-        _ => 0,
-    }
+/// Height of the scrollable editor body, matching the full-screen chrome.
+fn editor_body_px(ui: &AppWindow) -> f32 {
+    let (_, win_h) = viewport_size(ui);
+    (win_h + TOP_BAR_HEIGHT - 96.0 - 36.0).max(64.0)
 }
 
-fn block_display_text(block: &BlockEdit) -> String {
-    match &block.kind {
-        BlockKind::Heading { .. } => block
-            .text
-            .trim_start()
-            .trim_start_matches('#')
-            .trim_start()
-            .to_owned(),
-        BlockKind::Quote(_) => block
-            .text
-            .lines()
-            .map(|line| {
-                let stripped = line.trim_start();
-                stripped
-                    .strip_prefix('>')
-                    .map(str::trim_start)
-                    .unwrap_or(stripped)
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => block.text.clone(),
-    }
+/// Hold the scroll offset one frame so closing the timer's layout settles,
+/// then jump the active block to the center of the panel body.
+fn scroll_editor_to_active(ui: &AppWindow, target_y: f32) {
+    let uiw = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(16), move || {
+        if let Some(ui) = uiw.upgrade() {
+            ui.set_editor_scroll_y(target_y);
+        }
+    });
 }
 
-fn begin_editor_session(
+/// Prepare the editor session
+fn prepare_editor_session(
     state: &Rc<SharedState>,
     ui: &AppWindow,
     note_id: NoteId,
     title: String,
     body: String,
-    card_id: i32,
 ) {
     *state.editor.lock().unwrap() = Some(EditorSession::new(&body));
     *state.editor_note.lock().unwrap() = Some(note_id);
     *state.editor_title.lock().unwrap() = Some(title.clone());
     state.editor_dirty.store(true, Ordering::Relaxed);
     ui.set_editor_title(title.into());
-    ui.set_editor_open(true);
     publish_editor_blocks(state, ui);
-    frame_editor_entry(state, ui, card_id);
-}
-
-fn frame_editor_entry(state: &Rc<SharedState>, ui: &AppWindow, card_id: i32) {
-    let cards = state.cards.lock().unwrap();
-    let Some(card) = cards.iter().find(|card| card.id == card_id) else {
-        return;
-    };
-    let center_x = card.x;
-    let center_y = card.y;
-    drop(cards);
-    let current = MapCamera {
-        x: ui.get_camera_x(),
-        y: ui.get_camera_y(),
-        zoom: ui.get_zoom(),
-    };
-    *state.editor_prev_camera.lock().unwrap() = Some(current);
-    let (view_w, view_h) = viewport_size(ui);
-    let target = map::frame_card(center_x, center_y, view_w, view_h);
-    start_camera_glide(state, ui, target);
+    let glide_done = state.glide.lock().unwrap().is_none();
+    if glide_done {
+        maybe_reveal_editor(state, ui);
+    }
 }
 
 fn finish_editor_session(state: &Rc<SharedState>, ui: &AppWindow) {
@@ -569,7 +582,7 @@ fn restore_editor_camera(state: &Rc<SharedState>, ui: &AppWindow) {
     }
 }
 
-fn cancel_camera_glide(state: &Rc<SharedState>) {
+fn cancel_camera_glide(state: &SharedState) {
     *state.glide.lock().unwrap() = None;
 }
 
@@ -1043,6 +1056,10 @@ fn viewport_size(ui: &AppWindow) -> (f32, f32) {
 }
 
 fn start_camera_glide(state: &Rc<SharedState>, ui: &AppWindow, to: MapCamera) {
+    start_glide(state, ui, to, GLIDE_DURATION);
+}
+
+fn start_glide(state: &Rc<SharedState>, ui: &AppWindow, to: MapCamera, duration: Duration) {
     let from = MapCamera {
         x: ui.get_camera_x(),
         y: ui.get_camera_y(),
@@ -1052,7 +1069,7 @@ fn start_camera_glide(state: &Rc<SharedState>, ui: &AppWindow, to: MapCamera) {
         from,
         to,
         started: Instant::now(),
-        duration: GLIDE_DURATION,
+        duration,
     });
     arm_glide_tick(state, ui);
 }
@@ -1101,6 +1118,8 @@ fn glide_step(state: &Rc<SharedState>, ui: &AppWindow) {
     rebuild_paths(state, ui);
     if !finished {
         arm_glide_tick(state, ui);
+    } else {
+        maybe_reveal_editor(state, ui);
     }
 }
 

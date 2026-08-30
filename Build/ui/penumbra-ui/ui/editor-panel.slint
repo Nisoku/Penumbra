@@ -1,63 +1,73 @@
-import { LineEdit } from "std-widgets.slint";
 import { Theme, BlockVM } from "theme.slint";
 
-component ProsePreview inherits Rectangle {
-    in property <string> content: "";
-    callback open(int);
-    height: body.preferred-height + 20px;
-    border-radius: 8px;
+component ProseBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: 6px;
+    background: block-touch.has-hover ? Theme.wash : transparent;
 
     body := StyledText {
-        x: 14px;
-        y: 10px;
-        width: parent.width - 28px;
+        x: 8px;
+        y: 4px;
+        width: parent.width - 16px;
         text: @markdown("\{root.content}");
         default-color: Theme.ink;
         default-font-size: 15px;
+        vertical-alignment: top;
         link-color: Theme.accent;
     }
 
-    TouchArea {
+    height: body.preferred-height + 8px;
+
+    block-touch := TouchArea {
         width: 100%;
-        height: 100%;
-        clicked => { root.open(0); }
+        height: parent.height;
+        clicked => { root.open(); }
     }
 }
 
-component HeadingPreview inherits Rectangle {
-    in property <string> content: "";
-    in property <int> level: 1;
-    callback open(int);
-    height: body.preferred-height + 20px;
-    border-radius: 8px;
+component HeadingBlock inherits Rectangle {
+    in property <string> content;
+    in property <int> level;
+    callback open();
+
+    width: 100%;
+    border-radius: 6px;
+    background: block-touch.has-hover ? Theme.wash : transparent;
 
     body := Text {
-        x: 14px;
-        y: 10px;
-        width: parent.width - 28px;
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
         text: root.content;
-        font-weight: 700;
-        font-size: root.level == 1 ? 22px : (root.level == 2 ? 19px : 16px);
+        font-size: root.level == 1 ? 24px : (root.level == 2 ? 20px : (root.level == 3 ? 17px : 15px));
+        font-weight: 600;
         color: Theme.ink;
         wrap: TextWrap.word-wrap;
     }
 
-    TouchArea {
+    height: body.preferred-height + 16px;
+
+    block-touch := TouchArea {
         width: 100%;
-        height: 100%;
-        clicked => { root.open(0); }
+        height: parent.height;
+        clicked => { root.open(); }
     }
 }
 
-component QuotePreview inherits Rectangle {
-    in property <string> content: "";
-    callback open(int);
-    height: body.preferred-height + 20px;
-    border-radius: 8px;
+component QuoteBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: 6px;
+    background: block-touch.has-hover ? Theme.wash : transparent;
 
     Rectangle {
-        x: 10px;
-        y: 10px;
+        x: 8px;
+        y: 4px;
         width: 3px;
         height: Math.max(body.height, 18px);
         border-radius: 2px;
@@ -65,9 +75,9 @@ component QuotePreview inherits Rectangle {
     }
 
     body := Text {
-        x: 22px;
-        y: 10px;
-        width: parent.width - 36px;
+        x: 16px;
+        y: 4px;
+        width: parent.width - 24px;
         text: root.content;
         font-size: 15px;
         font-italic: true;
@@ -75,76 +85,219 @@ component QuotePreview inherits Rectangle {
         wrap: TextWrap.word-wrap;
     }
 
-    TouchArea {
+    height: body.preferred-height + 8px;
+
+    block-touch := TouchArea {
         width: 100%;
-        height: 100%;
-        clicked => { root.open(0); }
+        height: parent.height;
+        clicked => { root.open(); }
     }
 }
 
-component CodePreview inherits Rectangle {
-    in property <string> content: "";
-    callback open(int);
-    height: body.preferred-height + 20px;
+component CodeBlock inherits Rectangle {
+    in property <string> content;
+    in property <string> language;
+    callback open();
+
+    width: 100%;
     border-radius: 8px;
+    background: Theme.well;
 
-    Rectangle {
-        x: 14px;
-        y: 10px;
-        width: parent.width - 28px;
-        height: body.preferred-height + 16px;
-        border-radius: 6px;
-        background: Theme.ground-sunken;
-
-        body := Text {
-            x: 10px;
-            y: 8px;
-            width: parent.width - 20px;
-            text: root.content;
-            font-family: "monospace";
-            font-size: 12.5px;
-            color: Theme.ink-secondary;
-            wrap: TextWrap.word-wrap;
-        }
+    if root.language != "": Text {
+        x: 12px;
+        y: 8px;
+        text: root.language;
+        font-family: "monospace";
+        font-size: 11px;
+        color: Theme.placeholder;
     }
-
-    TouchArea {
-        width: 100%;
-        height: 100%;
-        clicked => { root.open(0); }
-    }
-}
-
-component PlainPreview inherits Rectangle {
-    in property <string> content: "";
-    callback open(int);
-    height: body.preferred-height + 20px;
-    border-radius: 8px;
 
     body := Text {
-        x: 14px;
-        y: 10px;
-        width: parent.width - 28px;
+        x: 12px;
+        y: root.language != "" ? 30px : 12px;
+        width: parent.width - 24px;
         text: root.content;
-        font-size: 13px;
-        color: Theme.ink-tertiary;
+        font-family: "monospace";
+        font-size: 12.5px;
+        color: Theme.ink-secondary;
         wrap: TextWrap.word-wrap;
     }
 
-    TouchArea {
+    height: body.preferred-height + (root.language != "" ? 42px : 24px);
+
+    block-touch := TouchArea {
         width: 100%;
-        height: 100%;
-        clicked => { root.open(0); }
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}
+
+component TableBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: 8px;
+    background: Theme.well;
+
+    body := Text {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        text: root.content;
+        font-family: "monospace";
+        font-size: 12.5px;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: body.preferred-height + 24px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}
+
+component FootnoteBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: 6px;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    body := StyledText {
+        x: 8px;
+        y: 4px;
+        width: parent.width - 16px;
+        text: @markdown("\{root.content}");
+        default-color: Theme.ink-secondary;
+        default-font-size: 13px;
+        vertical-alignment: top;
+        link-color: Theme.accent;
+    }
+
+    height: body.preferred-height + 8px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}
+
+component HtmlBlock inherits Rectangle {
+    callback open();
+
+    width: 100%;
+    border-radius: 6px;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    Text {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        text: "<html>";
+        font-family: "monospace";
+        font-size: 11px;
+        color: Theme.placeholder;
+    }
+
+    height: 30px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}
+
+component ActiveBlock inherits Rectangle {
+    in property <BlockVM> block;
+    in property <int> focus-id;
+
+    callback text-changed(int, string);
+    callback split(int, int);
+    callback merge-up(int);
+    callback undo();
+    callback redo();
+    callback move-active(int);
+
+    width: 100%;
+    border-radius: 8px;
+    background: Theme.card-glass;
+    border-width: 1px;
+    border-color: Theme.accent-soft;
+    height: root.block.kind == "code" ? 168px : (root.block.kind == "heading" ? 48px : 64px);
+
+    Rectangle {
+        x: 0px;
+        y: 8px;
+        width: 2px;
+        height: Math.max(parent.height - 16px, 20px);
+        border-radius: 1px;
+        background: Theme.accent;
+    }
+
+    editor-field := TextInput {
+        x: 16px;
+        y: 8px;
+        width: parent.width - 32px;
+        height: parent.height - 16px;
+        text: root.block.edit-text;
+        color: Theme.ink;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: #FFFFFF;
+        font-family: root.block.kind == "code" ? "monospace" : "";
+        font-size: root.block.kind == "code" ? 12.5px : 15px;
+        single-line: root.block.kind == "heading";
+        wrap: TextWrap.word-wrap;
+        init => {
+            if (root.focus-id == root.block.id) {
+                self.focus();
+            }
+        }
+        edited => { root.text-changed(root.block.id, self.text); }
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == "z") {
+                    if (event.modifiers.shift) {
+                        root.redo();
+                    } else {
+                        root.undo();
+                    }
+                    accept;
+                }
+                reject;
+            } else if (event.text == Key.Return && !(root.block.kind == "code") && !event.modifiers.shift) {
+                root.split(root.block.id, self.cursor-position-byte-offset);
+                accept;
+            } else if (event.text == Key.Backspace && self.cursor-position-byte-offset == 0) {
+                root.merge-up(root.block.id);
+                accept;
+            } else if (event.text == Key.UpArrow && root.block.kind == "heading") {
+                root.move-active(-1);
+                accept;
+            } else if (event.text == Key.DownArrow && root.block.kind == "heading") {
+                root.move-active(1);
+                accept;
+            } else {
+                reject;
+            }
+        }
     }
 }
 
 export component EditorPanel inherits Rectangle {
-    background: Theme.ground;
+    background: transparent;
+    visible: root.open;
     clip: true;
 
     in property <[BlockVM]> blocks: [];
     in property <bool> open: false;
-    in property <length> panel-width: root.width;
+    in-out property <length> editor-scroll-y: 0px;
     in property <string> note-title: "";
     in property <int> focus-id: -1;
     callback open-block(int);
@@ -157,174 +310,212 @@ export component EditorPanel inherits Rectangle {
     callback redo();
     callback move-active(int);
 
-    x: root.open ? 0px : root.panel-width;
-    visible: root.open;
-    animate x { duration: 200ms; easing: cubic-bezier(0.25, 0.1, 0.25, 1); }
+    dim := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.scrim;
+        opacity: root.open ? 1 : 0;
+        animate opacity { duration: 260ms; easing: ease-out; }
+    }
 
-    Rectangle {
+    panel-surface := Rectangle {
+        x: 0px;
+        y: 0px;
         width: 100%;
-        height: 64px;
-        y: 0;
-        background: Theme.ground-sunken;
+        height: 100%;
+        background: Theme.ground;
+        opacity: root.open ? 1 : 0;
+        animate opacity { duration: 240ms; easing: ease-out; }
 
-        VerticalLayout {
-            x: 20px;
-            y: 12px;
-            width: parent.width - 40px;
-            height: parent.height - 24px;
-            spacing: 6px;
+        Rectangle {
+            y: 0px;
+            width: parent.width;
+            height: 96px;
 
             HorizontalLayout {
-                spacing: 8px;
+                x: 32px;
+                y: 24px;
+                width: parent.width - 64px;
+                height: 48px;
+                spacing: 16px;
+                alignment: center;
+
+                title-edit := TextInput {
+                    horizontal-stretch: 1;
+                    height: 100%;
+                    vertical-alignment: center;
+                    text: root.note-title;
+                    font-size: 28px;
+                    font-weight: 600;
+                    color: Theme.ink;
+                    single-line: true;
+                    init => { self.focus(); }
+                    edited => { root.title-changed(self.text); }
+
+                    if self.text == "" && !self.has-focus: Text {
+                        height: 100%;
+                        width: 100%;
+                        text: "Untitled";
+                        font-size: 28px;
+                        font-weight: 600;
+                        color: Theme.placeholder;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    text: root.blocks.length == 1 ? "1 block" : "\{root.blocks.length} blocks";
+                    font-size: 11px;
+                    letter-spacing: 0.3px;
+                    color: Theme.placeholder;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.hairline;
+            }
+        }
+
+        body := Flickable {
+            y: 96px;
+            width: parent.width;
+            height: parent.height - 96px - 36px;
+            viewport-y <=> root.editor-scroll-y;
+
+            HorizontalLayout {
+                width: parent.width;
+                alignment: center;
+
+                VerticalLayout {
+                    width: Math.min(parent.width - 96px, 720px);
+                    padding-top: 28px;
+                    padding-bottom: 48px;
+                    padding-left: 32px;
+                    padding-right: 32px;
+                    spacing: 4px;
+
+                    for block in root.blocks: VerticalLayout {
+                        spacing: 0px;
+                        width: parent.width;
+
+                        if block.is-active: ActiveBlock {
+                            block: block;
+                            focus-id: root.focus-id;
+                            width: parent.width;
+                            text-changed(id, text) => { root.text-changed(id, text); }
+                            split(id, caret) => { root.split(id, caret); }
+                            merge-up(id) => { root.merge-up(id); }
+                            undo => { root.undo(); }
+                            redo => { root.redo(); }
+                            move-active(delta) => { root.move-active(delta); }
+                        }
+
+                        if !block.is-active && (block.kind == "paragraph" || block.kind == "list"): ProseBlock {
+                            content: block.text;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "heading": HeadingBlock {
+                            content: block.text;
+                            level: block.level;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "quote": QuoteBlock {
+                            content: block.text;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "code": CodeBlock {
+                            content: block.text;
+                            language: block.language;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "table": TableBlock {
+                            content: block.text;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "footnote": FootnoteBlock {
+                            content: block.text;
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+
+                        if !block.is-active && block.kind == "html": HtmlBlock {
+                            width: parent.width;
+                            open() => { root.open-block(block.id); }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.blocks.length == 0: Rectangle {
+            y: 96px;
+            width: parent.width;
+            height: parent.height - 96px - 36px;
+
+            VerticalLayout {
+                width: 100%;
+                height: 100%;
+                spacing: 6px;
+                alignment: center;
+
+                Text {
+                    horizontal-alignment: center;
+                    text: "This note is empty";
+                    font-size: 17px;
+                    font-weight: 600;
+                    color: Theme.ink;
+                }
+
+                Text {
+                    horizontal-alignment: center;
+                    text: "Start writing, return at a caret splits a block";
+                    font-size: 13px;
+                    color: Theme.placeholder;
+                }
+            }
+        }
+
+        Rectangle {
+            y: parent.height - 36px;
+            width: parent.width;
+            height: 36px;
+
+            Rectangle {
+                y: 0px;
+                width: parent.width;
+                height: 1px;
+                background: Theme.hairline;
+            }
+
+            HorizontalLayout {
+                x: 32px;
+                y: 0px;
+                width: parent.width - 64px;
+                height: parent.height;
+                alignment: end;
 
                 Text {
                     vertical-alignment: center;
-                    text: "Note";
+                    text: "return splits, esc closes the note";
                     font-size: 11px;
-                    font-weight: 600;
-                    color: Theme.ink-tertiary;
-                }
-
-                note-title := LineEdit {
-                    horizontal-stretch: 1;
-                    text: root.note-title;
-                    placeholder-text: "Untitled";
-                    edited => { root.title-changed(self.text); }
-                }
-
-                Rectangle {
-                    width: 20px;
-                    height: 20px;
-                    border-radius: 4px;
-                    background: esc-touch.has-hover ? Theme.hairline : transparent;
-
-                    esc-touch := TouchArea {
-                        clicked => { root.close(); }
-                    }
-
-                    Text {
-                        width: 100%;
-                        height: 100%;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        text: "Esc";
-                        font-size: 10px;
-                        color: Theme.ink-secondary;
-                    }
-                }
-            }
-
-            Text {
-                text: "return splits the block - esc closes the note";
-                font-size: 11px;
-                color: Theme.ink-tertiary;
-            }
-        }
-    }
-
-    Flickable {
-        y: 64px;
-        width: 100%;
-        height: parent.height - 64px;
-
-        VerticalLayout {
-            padding-top: 20px;
-            padding-bottom: 28px;
-            padding-left: 24px;
-            padding-right: 24px;
-            spacing: 10px;
-            width: parent.width;
-
-            for block in root.blocks: VerticalLayout {
-                spacing: 0px;
-                width: parent.width;
-
-                if !block.is-active && (block.kind == "paragraph" || block.kind == "list"): ProsePreview {
-                    content: block.text;
-                    width: parent.width;
-                    open(id) => { root.open-block(block.id); }
-                }
-
-                if !block.is-active && block.kind == "heading": HeadingPreview {
-                    content: block.text;
-                    level: block.level;
-                    width: parent.width;
-                    open(id) => { root.open-block(block.id); }
-                }
-
-                if !block.is-active && block.kind == "quote": QuotePreview {
-                    content: block.text;
-                    width: parent.width;
-                    open(id) => { root.open-block(block.id); }
-                }
-
-                if !block.is-active && block.kind == "code": CodePreview {
-                    content: block.text;
-                    width: parent.width;
-                    open(id) => { root.open-block(block.id); }
-                }
-
-                if !block.is-active && (block.kind == "table" || block.kind == "break"): PlainPreview {
-                    content: block.text;
-                    width: parent.width;
-                    open(id) => { root.open-block(block.id); }
-                }
-
-                if block.is-active: Rectangle {
-                    border-radius: 8px;
-                    width: 100%;
-                    height: Math.max(120px, editor-field.preferred-height + 20px);
-                    background: Theme.ground-sunken;
-                    border-width: 1px;
-                    border-color: Theme.accent-soft;
-
-                    editor-field := TextInput {
-                        x: 14px;
-                        y: 10px;
-                        width: parent.width - 28px;
-                        height: parent.height - 20px;
-                        text: block.edit-text;
-                        color: Theme.ink;
-                        selection-background-color: Theme.accent;
-                        selection-foreground-color: #FFFFFF;
-                        font-family: block.kind == "code" ? "monospace" : "";
-                        font-size: 15px;
-                        single-line: block.kind == "heading" || block.kind == "list" || block.kind == "table";
-                        wrap: TextWrap.word-wrap;
-                        init => {
-                            if (root.focus-id == block.id) {
-                                self.focus();
-                            }
-                        }
-                        edited => { root.text-changed(block.id, self.text); }
-                        key-pressed(event) => {
-                            if (event.modifiers.control || event.modifiers.meta) {
-                                if (event.text == "z") {
-                                    if (event.modifiers.shift) {
-                                        root.redo();
-                                    } else {
-                                        root.undo();
-                                    }
-                                    accept;
-                                }
-                                reject;
-                            } else if (event.text == Key.Return && !(block.kind == "code") && !event.modifiers.shift) {
-                                root.split(block.id, self.cursor-position-byte-offset);
-                                accept;
-                            } else if (event.text == Key.Backspace && self.cursor-position-byte-offset == 0) {
-                                root.merge-up(block.id);
-                                accept;
-                            } else if (event.text == Key.UpArrow && (block.kind == "heading" || block.kind == "list" || block.kind == "table")) {
-                                root.move-active(-1);
-                                accept;
-                            } else if (event.text == Key.DownArrow && (block.kind == "heading" || block.kind == "list" || block.kind == "table")) {
-                                root.move-active(1);
-                                accept;
-                            } else {
-                                reject;
-                            }
-                        }
-                    }
+                    letter-spacing: 0.3px;
+                    color: Theme.placeholder;
                 }
             }
         }

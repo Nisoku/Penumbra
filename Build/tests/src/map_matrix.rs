@@ -112,6 +112,27 @@ fn frame_card_scales_offsets_with_viewport_zoom() {
 }
 
 #[test]
+fn zoom_card_grows_card_to_viewport_width() {
+    let cam = map::zoom_card(1000.0, 600.0, 800.0, 600.0);
+    assert!((cam.zoom * 180.0 - 800.0).abs() < 0.01);
+}
+
+#[test]
+fn zoom_card_centers_card_horizontally_and_vertically() {
+    let cam = map::zoom_card(1000.0, 600.0, 800.0, 600.0);
+    assert_eq!(cam.x, 1000.0 - 800.0 / cam.zoom * 0.5);
+    assert_eq!(cam.y, 600.0 - 600.0 / cam.zoom * 0.5);
+}
+
+#[test]
+fn zoom_card_clamps_to_max_and_min_zoom() {
+    let wide = map::zoom_card(0.0, 0.0, 4000.0, 2000.0);
+    assert!(wide.zoom <= 8.0);
+    let narrow = map::zoom_card(0.0, 0.0, 240.0, 200.0);
+    assert!(narrow.zoom >= map::CARD_READING_ZOOM);
+}
+
+#[test]
 fn grid_path_anchors_to_camera_and_clamps_density() {
     let cam = MapCamera {
         x: 5000.0,

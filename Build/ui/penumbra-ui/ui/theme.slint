@@ -12,6 +12,10 @@ export global Theme {
     out property<color> card-shadow: #1F1D1A1A;
     out property<color> edge: #1F1D1A38;
     out property<color> edge-selected: #3D56B073;
+    out property<color> placeholder: #98938A;
+    out property<color> wash: #3D56B014;
+    out property<color> well: #EFECE5;
+    out property<color> scrim: #1F1D1A59;
 }
 
 export struct BlockVM {
@@ -21,6 +25,7 @@ export struct BlockVM {
     is-active: bool,
     kind: string,
     level: int,
+    language: string,
 }
 
 export struct NoteCardVM {
