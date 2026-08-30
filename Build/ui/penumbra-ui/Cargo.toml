@@ -26,6 +26,8 @@ penumbra-embed = { path = "../../crates/penumbra-embed" }
 penumbra-editor = { path = "../../crates/penumbra-editor" }
 penumbra-layout = { path = "../../crates/penumbra-layout" }
 penumbra-graph = { path = "../../crates/penumbra-graph" }
+penumbra-auto-link = { path = "../../crates/penumbra-auto-link" }
+penumbra-index = { path = "../../crates/penumbra-index" }
 
 [features]
 default = []

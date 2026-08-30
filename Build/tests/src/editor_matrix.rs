@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use penumbra_editor::{
-    apply_command, BlockKind, BlockMark, Command, Cursor, Document, Journal, Selection, ViewModel,
+    apply_command, BlockKind, BlockMark, Command, Cursor, Document, EditorSession, Journal,
+    Selection, ViewModel,
 };
 
 // Document
@@ -247,4 +248,156 @@ fn bold_across_block() {
     };
     let result = apply_command(source, &cmd).unwrap();
     assert_eq!(result, source);
+}
+
+// EditorSession
+
+#[test]
+fn session_splits_paragraph_into_two() {
+    let mut session = EditorSession::new("one two three");
+    assert_eq!(session.blocks().len(), 1);
+    session.split_active_at("one ".len());
+    assert_eq!(session.blocks().len(), 2);
+    assert_eq!(session.blocks()[0].text, "one");
+    assert_eq!(session.blocks()[1].text, "two three");
+    assert_eq!(session.active(), 1);
+    assert_eq!(session.raw_body(), "one\n\ntwo three");
+}
+
+#[test]
+fn session_heading_split_drops_tail_into_paragraph() {
+    let mut session = EditorSession::new("## Alpha beta");
+    session.split_active_at("## Alpha ".len());
+    assert_eq!(session.blocks().len(), 2);
+    assert!(matches!(session.blocks()[0].kind, BlockKind::Heading(2)));
+    assert!(matches!(session.blocks()[1].kind, BlockKind::Paragraph));
+    assert_eq!(session.blocks()[1].text, "beta");
+}
+
+#[test]
+fn session_list_split_keeps_list_kind() {
+    let mut session = EditorSession::new("- alpha\n- beta");
+    session.set_active(0);
+    session.split_active_at("- al".len());
+    assert_eq!(session.blocks().len(), 2);
+    assert!(matches!(session.blocks()[0].kind, BlockKind::List { .. }));
+    assert!(matches!(session.blocks()[1].kind, BlockKind::List { .. }));
+    assert_eq!(session.blocks()[0].text, "- al");
+    assert_eq!(session.blocks()[1].text, "pha\n- beta");
+    assert_eq!(session.raw_body(), "- al\npha\n- beta");
+}
+
+#[test]
+fn session_enter_at_block_start_opens_paragraph_above() {
+    let mut session = EditorSession::new("hello");
+    session.split_active_at(0);
+    assert_eq!(session.blocks().len(), 2);
+    assert_eq!(session.blocks()[0].kind, BlockKind::Paragraph);
+    assert!(session.blocks()[0].text.is_empty());
+    assert_eq!(session.active(), 0);
+}
+
+#[test]
+fn session_enter_in_empty_block_removes_it() {
+    let mut session = EditorSession::new("alpha\n\nbeta");
+    assert_eq!(session.blocks().len(), 2);
+    session.set_active(1);
+    session.split_active_at(0);
+    assert_eq!(session.blocks().len(), 3);
+    assert_eq!(session.blocks()[1].text, "");
+    assert_eq!(session.active(), 1);
+    session.apply_active_text("");
+    session.split_active_at(0);
+    assert_eq!(session.blocks().len(), 2);
+}
+
+#[test]
+fn session_merge_into_previous_joins_prose_with_space() {
+    let mut session = EditorSession::new("alpha\n\nbeta");
+    session.set_active(1);
+    session.merge_into_previous();
+    assert_eq!(session.blocks().len(), 1);
+    assert_eq!(session.blocks()[0].text, "alpha beta");
+    assert_eq!(session.active(), 0);
+}
+
+#[test]
+fn session_merge_respects_trailing_whitespace() {
+    let mut session = EditorSession::new("prefix  \n\nnext");
+    session.set_active(1);
+    session.merge_into_previous();
+    assert_eq!(session.blocks()[0].text, "prefix  next");
+}
+
+#[test]
+fn session_merge_list_joins_on_newline() {
+    let mut session = EditorSession::new("- a\n- b");
+    session.set_active(1);
+    session.merge_into_previous();
+    assert_eq!(session.blocks().len(), 1);
+    assert_eq!(session.blocks()[0].text, "- a\n- b");
+}
+
+#[test]
+fn session_apply_text_normalizes_blank_lines_in_prose() {
+    let mut session = EditorSession::new("alpha");
+    session.apply_active_text("line one\n\n\nline two\n");
+    assert_eq!(session.blocks()[0].text, "line one\nline two");
+    assert_eq!(session.raw_body(), "line one\nline two");
+}
+
+#[test]
+fn session_code_block_keeps_raw_newlines() {
+    let session = EditorSession::new("```rust\nfn main() {}\n```");
+    let body = session.blocks()[0].text.clone();
+    assert_eq!(session.active_mode(), penumbra_editor::BlockMode::Raw);
+    assert_eq!(body, "```rust\nfn main() {}\n```");
+}
+
+#[test]
+fn session_undo_restores_previous_body() {
+    let mut session = EditorSession::new("alpha\n\nbeta");
+    session.set_active(1);
+    session.apply_active_text("be ta");
+    assert_eq!(session.raw_body(), "alpha\n\nbe ta");
+    session.undo();
+    assert_eq!(session.raw_body(), "alpha\n\nbeta");
+    session.redo();
+    assert_eq!(session.raw_body(), "alpha\n\nbe ta");
+}
+
+#[test]
+fn session_undo_split_restores_single_block() {
+    let mut session = EditorSession::new("one two");
+    session.split_active_at(4);
+    assert_eq!(session.blocks().len(), 2);
+    session.undo();
+    assert_eq!(session.blocks().len(), 1);
+    assert_eq!(session.blocks()[0].text, "one two");
+}
+
+#[test]
+fn session_raw_body_serializes_lists_and_prose() {
+    let session = EditorSession::new("intro\n\n- a\n- b\n\noutro");
+    assert_eq!(session.blocks().len(), 3);
+    assert_eq!(session.raw_body(), "intro\n\n- a\n- b\n\noutro");
+}
+
+#[test]
+fn session_thematic_break_is_omitted_from_editing_blocks() {
+    let session = EditorSession::new("alpha\n\n---\n\nbeta");
+    assert_eq!(session.blocks().len(), 2);
+    assert!(session
+        .blocks()
+        .iter()
+        .all(|b| !matches!(b.kind, BlockKind::ThematicBreak)));
+}
+
+#[test]
+fn session_multi_byte_split_lands_on_char_boundary() {
+    let mut session = EditorSession::new("café latte");
+    session.split_active_at(4);
+    assert_eq!(session.blocks().len(), 2);
+    assert_eq!(session.blocks()[0].text, "café");
+    assert_eq!(session.blocks()[1].text, "latte");
 }

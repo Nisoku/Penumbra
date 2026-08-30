@@ -132,11 +132,11 @@ export component MapCanvas inherits Rectangle {
     }
 
     Text {
-        x: parent.width - 24px;
+        x: (parent.width - self.width) / 2;
         y: parent.height - 36px;
         text: Math.round(root.note-cards.length) + " notes | zoom: " + Math.round(root.zoom * 100) + "%";
         font-size: 11px;
         color: Theme.ink-tertiary;
-        horizontal-alignment: right;
+        horizontal-alignment: center;
     }
 }

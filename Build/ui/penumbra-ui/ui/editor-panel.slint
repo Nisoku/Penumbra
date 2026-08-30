@@ -1,5 +1,142 @@
-import { TextEdit } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { Theme, BlockVM } from "theme.slint";
+
+component ProsePreview inherits Rectangle {
+    in property <string> content: "";
+    callback open(int);
+    height: body.preferred-height + 20px;
+    border-radius: 8px;
+
+    body := StyledText {
+        x: 14px;
+        y: 10px;
+        width: parent.width - 28px;
+        text: @markdown("\{root.content}");
+        default-color: Theme.ink;
+        default-font-size: 15px;
+        link-color: Theme.accent;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open(0); }
+    }
+}
+
+component HeadingPreview inherits Rectangle {
+    in property <string> content: "";
+    in property <int> level: 1;
+    callback open(int);
+    height: body.preferred-height + 20px;
+    border-radius: 8px;
+
+    body := Text {
+        x: 14px;
+        y: 10px;
+        width: parent.width - 28px;
+        text: root.content;
+        font-weight: 700;
+        font-size: root.level == 1 ? 22px : (root.level == 2 ? 19px : 16px);
+        color: Theme.ink;
+        wrap: TextWrap.word-wrap;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open(0); }
+    }
+}
+
+component QuotePreview inherits Rectangle {
+    in property <string> content: "";
+    callback open(int);
+    height: body.preferred-height + 20px;
+    border-radius: 8px;
+
+    Rectangle {
+        x: 10px;
+        y: 10px;
+        width: 3px;
+        height: Math.max(body.height, 18px);
+        border-radius: 2px;
+        background: Theme.accent-soft;
+    }
+
+    body := Text {
+        x: 22px;
+        y: 10px;
+        width: parent.width - 36px;
+        text: root.content;
+        font-size: 15px;
+        font-italic: true;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open(0); }
+    }
+}
+
+component CodePreview inherits Rectangle {
+    in property <string> content: "";
+    callback open(int);
+    height: body.preferred-height + 20px;
+    border-radius: 8px;
+
+    Rectangle {
+        x: 14px;
+        y: 10px;
+        width: parent.width - 28px;
+        height: body.preferred-height + 16px;
+        border-radius: 6px;
+        background: Theme.ground-sunken;
+
+        body := Text {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            text: root.content;
+            font-family: "monospace";
+            font-size: 12.5px;
+            color: Theme.ink-secondary;
+            wrap: TextWrap.word-wrap;
+        }
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open(0); }
+    }
+}
+
+component PlainPreview inherits Rectangle {
+    in property <string> content: "";
+    callback open(int);
+    height: body.preferred-height + 20px;
+    border-radius: 8px;
+
+    body := Text {
+        x: 14px;
+        y: 10px;
+        width: parent.width - 28px;
+        text: root.content;
+        font-size: 13px;
+        color: Theme.ink-tertiary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.open(0); }
+    }
+}
 
 export component EditorPanel inherits Rectangle {
     background: Theme.ground;
@@ -8,9 +145,17 @@ export component EditorPanel inherits Rectangle {
     in property <[BlockVM]> blocks: [];
     in property <bool> open: false;
     in property <length> panel-width: root.width;
+    in property <string> note-title: "";
+    in property <int> focus-id: -1;
     callback open-block(int);
     callback close();
     callback text-changed(int, string);
+    callback title-changed(string);
+    callback split(int, int);
+    callback merge-up(int);
+    callback undo();
+    callback redo();
+    callback move-active(int);
 
     x: root.open ? 0px : root.panel-width;
     visible: root.open;
@@ -18,94 +163,167 @@ export component EditorPanel inherits Rectangle {
 
     Rectangle {
         width: 100%;
-        height: 32px;
+        height: 64px;
         y: 0;
         background: Theme.ground-sunken;
 
-        Text {
+        VerticalLayout {
             x: 20px;
-            height: 100%;
-            vertical-alignment: center;
-            text: "Editor";
-            font-size: 13px;
-            font-weight: 600;
-            color: Theme.ink;
-        }
+            y: 12px;
+            width: parent.width - 40px;
+            height: parent.height - 24px;
+            spacing: 6px;
 
-        Rectangle {
-            x: parent.width - 36px;
-            y: (parent.height - 20px) / 2;
-            width: 20px;
-            height: 20px;
-            border-radius: 4px;
-            background: esc-touch.has-hover ? Theme.hairline : transparent;
+            HorizontalLayout {
+                spacing: 8px;
 
-            esc-touch := TouchArea {
-                clicked => { root.close(); }
+                Text {
+                    vertical-alignment: center;
+                    text: "Note";
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: Theme.ink-tertiary;
+                }
+
+                note-title := LineEdit {
+                    horizontal-stretch: 1;
+                    text: root.note-title;
+                    placeholder-text: "Untitled";
+                    edited => { root.title-changed(self.text); }
+                }
+
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 4px;
+                    background: esc-touch.has-hover ? Theme.hairline : transparent;
+
+                    esc-touch := TouchArea {
+                        clicked => { root.close(); }
+                    }
+
+                    Text {
+                        width: 100%;
+                        height: 100%;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        text: "Esc";
+                        font-size: 10px;
+                        color: Theme.ink-secondary;
+                    }
+                }
             }
 
             Text {
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                text: "Esc";
-                font-size: 10px;
-                color: Theme.ink-secondary;
+                text: "return splits the block - esc closes the note";
+                font-size: 11px;
+                color: Theme.ink-tertiary;
             }
         }
     }
 
     Flickable {
-        y: 32px;
+        y: 64px;
         width: 100%;
-        height: parent.height - 32px;
+        height: parent.height - 64px;
 
         VerticalLayout {
             padding-top: 20px;
-            padding-bottom: 20px;
-            padding-left: 20px;
-            padding-right: 20px;
-            spacing: 4px;
+            padding-bottom: 28px;
+            padding-left: 24px;
+            padding-right: 24px;
+            spacing: 10px;
             width: parent.width;
 
             for block in root.blocks: VerticalLayout {
                 spacing: 0px;
                 width: parent.width;
 
-                if !block.is-active: Rectangle {
-                    border-radius: 4px;
-                    width: 100%;
-                    height: block-text.preferred-height + 24px;
+                if !block.is-active && (block.kind == "paragraph" || block.kind == "list"): ProsePreview {
+                    content: block.text;
+                    width: parent.width;
+                    open(id) => { root.open-block(block.id); }
+                }
 
-                    block-text := Text {
-                        x: 16px;
-                        y: 12px;
-                        width: parent.width - 32px;
-                        text: block.text;
-                        font-size: 15px;
-                        color: Theme.ink-secondary;
-                        wrap: TextWrap.word-wrap;
-                        overflow: elide;
-                    }
+                if !block.is-active && block.kind == "heading": HeadingPreview {
+                    content: block.text;
+                    level: block.level;
+                    width: parent.width;
+                    open(id) => { root.open-block(block.id); }
+                }
 
-                    TouchArea {
-                        clicked => { root.open-block(block.id); }
-                    }
+                if !block.is-active && block.kind == "quote": QuotePreview {
+                    content: block.text;
+                    width: parent.width;
+                    open(id) => { root.open-block(block.id); }
+                }
+
+                if !block.is-active && block.kind == "code": CodePreview {
+                    content: block.text;
+                    width: parent.width;
+                    open(id) => { root.open-block(block.id); }
+                }
+
+                if !block.is-active && (block.kind == "table" || block.kind == "break"): PlainPreview {
+                    content: block.text;
+                    width: parent.width;
+                    open(id) => { root.open-block(block.id); }
                 }
 
                 if block.is-active: Rectangle {
-                    border-radius: 4px;
-                    background: Theme.ground-sunken;
+                    border-radius: 8px;
                     width: 100%;
-                    height: Math.max(100px, edit-area.preferred-height + 24px);
+                    height: Math.max(120px, editor-field.preferred-height + 20px);
+                    background: Theme.ground-sunken;
+                    border-width: 1px;
+                    border-color: Theme.accent-soft;
 
-                    edit-area := TextEdit {
-                        x: 16px;
-                        y: 12px;
-                        width: parent.width - 32px;
-                        text: block.text;
+                    editor-field := TextInput {
+                        x: 14px;
+                        y: 10px;
+                        width: parent.width - 28px;
+                        height: parent.height - 20px;
+                        text: block.edit-text;
+                        color: Theme.ink;
+                        selection-background-color: Theme.accent;
+                        selection-foreground-color: #FFFFFF;
+                        font-family: block.kind == "code" ? "monospace" : "";
                         font-size: 15px;
+                        single-line: block.kind == "heading" || block.kind == "list" || block.kind == "table";
                         wrap: TextWrap.word-wrap;
+                        init => {
+                            if (root.focus-id == block.id) {
+                                self.focus();
+                            }
+                        }
                         edited => { root.text-changed(block.id, self.text); }
+                        key-pressed(event) => {
+                            if (event.modifiers.control || event.modifiers.meta) {
+                                if (event.text == "z") {
+                                    if (event.modifiers.shift) {
+                                        root.redo();
+                                    } else {
+                                        root.undo();
+                                    }
+                                    accept;
+                                }
+                                reject;
+                            } else if (event.text == Key.Return && !(block.kind == "code") && !event.modifiers.shift) {
+                                root.split(block.id, self.cursor-position-byte-offset);
+                                accept;
+                            } else if (event.text == Key.Backspace && self.cursor-position-byte-offset == 0) {
+                                root.merge-up(block.id);
+                                accept;
+                            } else if (event.text == Key.UpArrow && (block.kind == "heading" || block.kind == "list" || block.kind == "table")) {
+                                root.move-active(-1);
+                                accept;
+                            } else if (event.text == Key.DownArrow && (block.kind == "heading" || block.kind == "list" || block.kind == "table")) {
+                                root.move-active(1);
+                                accept;
+                            } else {
+                                reject;
+                            }
+                        }
                     }
                 }
             }

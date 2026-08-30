@@ -1,24 +1,25 @@
 # Penumbra
 
-- [ ] Slint UI
+- [x] Slint UI
 
 ## Slint
 
-- [Slint](https://slint.dev) for the UI <- write once (or twice since mobile) use anywhere UI. Pinned to the slint-ui/slint git rev `14c19d7` (post-#11580 wasm-wgpu + #12539 texture import fix) so a single wgpu renderer covers desktop and wasm.
-- for motion and stuff: Slint `animate` properties with `cubic-bezier` easing + `Timer`s. No separate animation crate needed >:3
+- [ ] [Slint](https://slint.dev) for the UI <- write once (or twice since mobile) use anywhere UI.
+- [ ] for motion and stuff: Slint `animate` properties with `cubic-bezier` easing + `Timer`s. No separate animation crate needed >:3
 
-- [ ] Use a Spring Animation in Slint. When the Candle calculation finishes, just update the "Target Coordinates" and let the card smoothly drift to its new neighbors (animate `x`/`y` on the card toward the new layout target; overshoot ~1.03-1.05 once, per DESIGN.md)
+- [x] Map canvas v1: infinite pan/zoom plane, chart grid + link edges as merged Slint `Path` layers (the wgpu underlay plan was dropped), viewport culling, LOD, boot camera centered on notes, positions cached in storage.
+- [x] Use a Spring Animation in Slint. Cards smoothly drift to their new layout neighbors (drag-release settle, pin, unpin) via a Rust `Timer` easing toward layout targets, overshoot feel per DESIGN.md. (Triggering on embedding stays behind the auto-link pipe.)
 - [ ] Camera "Lerp" (Linear Interpolation). If the user hovers over a search result, the camera starts drifting toward it. If they move their mouse away, it drifts back. (Rust Timer driving camera `x`/`y` toward a target that resets on mouse-out)
 - [ ] Imagine the user finishes a note on the canvas, and as they hit Esc, the note card slides across the map on its own to snap next to its "relatives" using the auto-associate and link thingy. (card animates `x`/`y` toward its post-edit layout target, MapCanvas emits LayoutChanged)
-- [ ] Local layout updates only: only the affected neighborhood recalculates
-  - Atomic Graph Updates: (when I have a new note get analyzed, it shouldn't update everything, it should atomically only update one area)
-- [ ] pinned notes act like fixed stars. They never move and everything else orbits around them. but like you DON'T need to have them either, natural ones via auto-linking (or manual linking) exist as well
-- [ ] positions are cached in storage: On startup, the map loads instantly instead of recomputing the entire thing.
+- [x] Local layout updates only: only the affected neighborhood recalculates (`step_neighborhood`; spatial-hash collision pass)
+  - [ ] Atomic Graph Updates: new-note still runs a full `step()`; neighborhood-only trigger waits on the embed/auto-link pipeline
+- [x] pinned notes act like fixed stars. They never move and everything else orbits around them. Pin via right-drag (right-tap unpins); left-drag nudges drift back to the pin; pins persist across restarts.
+- [x] positions are cached in storage: On startup, the map loads instantly instead of recomputing the entire thing. Throttled save (2s if dirty) + save-on-exit.
 
 ## WASM
 
 - [ ] running the Candle inference in a web worker (WASM) or a background thread (Desktop)
-- [ ] Layout runs in a background worker so the UI thread stays smooth. The map should never stutter because physics is cooking.
+- [x] Layout runs in a background worker so the UI thread stays smooth. Physics solves on the tokio runtime off the UI thread (desktop); wasm is still inline pending workers.
 
 ## Storage and Sync
 

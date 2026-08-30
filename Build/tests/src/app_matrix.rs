@@ -98,3 +98,63 @@ fn deleted_note_is_gone_after_reopen() {
         assert!(universe.graph().get_note(&id).is_none());
     });
 }
+
+#[test]
+fn implicit_links_survive_universe_reopen() {
+    with_rt(async {
+        let (guard, storage) = temp_storage();
+        let mut universe = Universe::open(storage).await.unwrap();
+        let a = universe
+            .create_note("Linked A".to_string(), "alpha\n".to_string())
+            .await
+            .unwrap();
+        let b = universe
+            .create_note("Linked B".to_string(), "beta\n".to_string())
+            .await
+            .unwrap();
+        universe
+            .graph()
+            .link_notes(&a, &b, penumbra_core::link::LinkKind::Implicit)
+            .unwrap();
+        assert_eq!(universe.implicit_link_pairs().len(), 1);
+        universe
+            .storage()
+            .save_implicit_links(&universe.implicit_link_pairs())
+            .await
+            .unwrap();
+        drop(universe);
+
+        let reopen = pollster::block_on(Storage::with_dir(DirectoryHandle::from(
+            guard.path().join("vault"),
+        )));
+        let universe = Universe::open(reopen).await.unwrap();
+        assert_eq!(universe.implicit_link_pairs().len(), 1);
+        assert!(universe.implicit_link_pairs().contains(&(a, b)));
+    });
+}
+
+#[test]
+fn implicit_links_dangling_endpoints_are_skipped_on_restore() {
+    with_rt(async {
+        let (guard, storage) = temp_storage();
+        let mut universe = Universe::open(storage).await.unwrap();
+        let a = universe
+            .create_note("Solo A".to_string(), "alpha\n".to_string())
+            .await
+            .unwrap();
+        let ghost = penumbra_core::note::NoteId::new();
+        let pairs = [(a, ghost), (ghost, a)].into_iter().collect();
+        universe
+            .storage()
+            .save_implicit_links(&pairs)
+            .await
+            .unwrap();
+        drop(universe);
+
+        let reopen = pollster::block_on(Storage::with_dir(DirectoryHandle::from(
+            guard.path().join("vault"),
+        )));
+        let universe = Universe::open(reopen).await.unwrap();
+        assert!(universe.implicit_link_pairs().is_empty());
+    });
+}

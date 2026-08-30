@@ -1,7 +1,7 @@
 //! Application orchestrator.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use penumbra_core::error::{PenumbraError, Result};
 use penumbra_core::link::{Link, LinkKind};
@@ -13,7 +13,7 @@ use penumbra_storage::{wikilink_targets, Storage};
 
 /// Owns the graph, vault storage, and event bus for one running instance.
 pub struct Universe {
-    graph: GraphStore,
+    graph: Arc<Mutex<GraphStore>>,
     storage: Storage,
     events: Arc<EventBus>,
     /// Frontmatter tag subsets per note id, tracked.
@@ -33,7 +33,7 @@ impl Universe {
     /// wikilinks in bodies; unresolved targets are skipped.
     pub async fn open(storage: Storage) -> Result<Self> {
         let mut universe = Self {
-            graph: GraphStore::new(),
+            graph: Arc::new(Mutex::new(GraphStore::new())),
             storage,
             events: Arc::new(EventBus::new()),
             structured_tags: HashMap::new(),
@@ -47,9 +47,14 @@ impl Universe {
         Arc::clone(&self.events)
     }
 
-    /// Read-only access to the restored graph.
-    pub fn graph(&self) -> &GraphStore {
-        &self.graph
+    /// The graph guarded for shared access by engine consumers.
+    pub fn graph(&self) -> MutexGuard<'_, GraphStore> {
+        self.graph.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The shared graph handle, for components that keep their own lock.
+    pub fn graph_handle(&self) -> Arc<Mutex<GraphStore>> {
+        Arc::clone(&self.graph)
     }
 
     /// Read-only access to the storage backend.
@@ -59,7 +64,21 @@ impl Universe {
 
     /// Number of notes currently held in memory.
     pub fn note_count(&self) -> usize {
-        self.graph.note_count()
+        self.graph().note_count()
+    }
+
+    /// The set of auto-associated (implicit) links currently in the graph.
+    pub fn implicit_link_pairs(&self) -> HashSet<(NoteId, NoteId)> {
+        self.graph()
+            .all_links()
+            .into_iter()
+            .filter(|link| link.kind == LinkKind::Implicit)
+            .map(|link| (link.source, link.target))
+            .collect()
+    }
+
+    fn lock_graph(&self) -> MutexGuard<'_, GraphStore> {
+        self.graph.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Create a note, persist it as a vault file, register the graph node
@@ -67,7 +86,7 @@ impl Universe {
     pub async fn create_note(&mut self, title: String, body: String) -> Result<NoteId> {
         let note = Note::new(title, body);
         self.storage.save_note(&note, &[]).await?;
-        if !self.graph.add_note(note.clone()) {
+        if !self.lock_graph().add_note(note.clone()) {
             return Err(PenumbraError::Graph(format!(
                 "note {} already exists",
                 note.id
@@ -86,8 +105,12 @@ impl Universe {
     /// old title is rewritten and republished too, mirroring Obsidian's
     /// rename behavior.
     pub async fn save_note(&mut self, note: Note) -> Result<()> {
-        let old_title = match self.graph.get_note(&note.id) {
-            Some(existing) => existing.title.clone(),
+        let existing_title = self
+            .lock_graph()
+            .get_note(&note.id)
+            .map(|n| n.title.clone());
+        let old_title = match existing_title {
+            Some(title) => title,
             None => {
                 self.structured_tags.insert(note.id, Vec::new());
                 note.title.clone()
@@ -95,11 +118,11 @@ impl Universe {
         };
         let title_changed = old_title != note.title;
 
-        if self.graph.get_note(&note.id).is_some() {
-            self.graph.update_note(&note.id, |existing| {
+        if self.lock_graph().get_note(&note.id).is_some() {
+            self.lock_graph().update_note(&note.id, |existing| {
                 *existing = note.clone();
             })?;
-        } else if !self.graph.add_note(note.clone()) {
+        } else if !self.lock_graph().add_note(note.clone()) {
             return Err(PenumbraError::Graph(format!(
                 "note {} already exists",
                 note.id
@@ -126,7 +149,7 @@ impl Universe {
     /// Remove a note file and its graph node, publish the removal.
     pub async fn delete_note(&mut self, id: &NoteId) -> Result<()> {
         let removed = self
-            .graph
+            .lock_graph()
             .remove_note(id)
             .ok_or_else(|| PenumbraError::NoteNotFound(id.to_string()))?;
         self.storage.delete_note(id).await?;
@@ -154,7 +177,24 @@ impl Universe {
             notes.len(),
             links.len()
         );
-        self.graph.restore(GraphSnapshot { notes, links });
+        self.lock_graph().restore(GraphSnapshot { notes, links });
+
+        let stored_implicit = self.storage.load_implicit_links().await?;
+        if let Some(pairs) = stored_implicit {
+            let mut restored = 0usize;
+            for (a, b) in pairs {
+                let mut graph = self.lock_graph();
+                if graph.get_note(&a).is_some()
+                    && graph.get_note(&b).is_some()
+                    && graph.link_notes(&a, &b, LinkKind::Implicit).is_ok()
+                {
+                    restored += 1;
+                }
+            }
+            if restored > 0 {
+                tracing::info!("restored {} implicit links", restored);
+            }
+        }
         Ok(())
     }
 
@@ -162,7 +202,7 @@ impl Universe {
     /// rename and republish updates for every touched note.
     async fn propagate_rename(&mut self, old_title: &str, renamed: &Note) -> Result<()> {
         let affected: Vec<NoteId> = self
-            .graph
+            .lock_graph()
             .all_notes()
             .filter(|other| other.id != renamed.id)
             .filter(|other| {
@@ -175,7 +215,7 @@ impl Universe {
 
         for id in affected {
             let mut updated = self
-                .graph
+                .lock_graph()
                 .get_note(&id)
                 .expect("collected from graph above")
                 .clone();
@@ -184,7 +224,7 @@ impl Universe {
             self.storage
                 .save_note(&updated, &self.structured_tags_for(id))
                 .await?;
-            self.graph.update_note(&id, |existing| {
+            self.lock_graph().update_note(&id, |existing| {
                 *existing = updated.clone();
             })?;
             let nid = updated.id;
@@ -205,27 +245,29 @@ impl Universe {
     /// Replace this note's outgoing Explicit edges with what its body
     /// currently links to.
     fn recompute_explicit_links(&mut self, id: &NoteId) {
-        let stale: Vec<(NoteId, NoteId)> = self
-            .graph
-            .get_links(id)
-            .into_iter()
-            .filter(|link| link.kind == LinkKind::Explicit && link.source == *id)
-            .map(|link| (link.source, link.target))
-            .collect();
+        let stale: Vec<(NoteId, NoteId)> = {
+            let graph = self.lock_graph();
+            graph
+                .get_links(id)
+                .into_iter()
+                .filter(|link| link.kind == LinkKind::Explicit && link.source == *id)
+                .map(|link| (link.source, link.target))
+                .collect()
+        };
         for (source, target) in stale {
-            if self.graph.unlink_notes(&source, &target).is_err() {
-                continue;
-            }
+            self.lock_graph().unlink_notes(&source, &target).ok();
         }
 
-        let Some(note) = self.graph.get_note(id).cloned() else {
+        let Some(note) = self.lock_graph().get_note(id).cloned() else {
             return;
         };
-        let titles: HashMap<String, NoteId> = self
-            .graph
-            .all_notes()
-            .map(|n| (n.title.to_lowercase(), n.id))
-            .collect();
+        let titles: HashMap<String, NoteId> = {
+            let graph = self.lock_graph();
+            graph
+                .all_notes()
+                .map(|n| (n.title.to_lowercase(), n.id))
+                .collect()
+        };
         for target in wikilink_targets(&note.body) {
             let Some(&target_id) = titles.get(&target.to_lowercase()) else {
                 continue;
@@ -236,7 +278,7 @@ impl Universe {
             // A pre-existing edge (for example an implicit one) wins over
             // adding a duplicate explicit edge in the other direction.
             let _ = self
-                .graph
+                .lock_graph()
                 .link_notes(&note.id, &target_id, LinkKind::Explicit);
         }
     }

@@ -1,11 +1,10 @@
-import { Button, LineEdit } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { Theme } from "theme.slint";
 
 export component TopBar inherits Rectangle {
     height: 52px;
     background: #F7F5F0E6;
 
-    callback new-note();
     in property <bool> ready: false;
 
     Text {
@@ -35,14 +34,6 @@ export component TopBar inherits Rectangle {
             placeholder-text: "Quick finder";
             enabled: false;
         }
-    }
-
-    Button {
-        x: parent.width - self.width - 20px;
-        y: (parent.height - self.height) / 2;
-        text: "New note";
-        enabled: root.ready;
-        clicked => { root.new-note(); }
     }
 
     Rectangle {

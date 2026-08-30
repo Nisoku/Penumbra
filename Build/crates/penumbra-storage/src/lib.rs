@@ -23,6 +23,7 @@ const APP_SUBDIR: &str = "Penumbra";
 const STATE_DIR: &str = ".penumbra";
 const WORKSPACE_FILE: &str = "workspace.json";
 const PINS_FILE: &str = "workspace.pins.json";
+const LINKS_FILE: &str = "workspace.links.json";
 const NOTE_EXTENSION: &str = ".md";
 
 /// A note as loaded from the vault, with the bookkeeping needed to write
@@ -281,6 +282,25 @@ impl Storage {
         Ok(Some(serde_json::from_slice(&data)?))
     }
 
+    /// Persist the set of auto-associated (implicit) links.
+    pub async fn save_implicit_links(&self, links: &HashSet<(NoteId, NoteId)>) -> Result<()> {
+        let mut file = self.links_file(true).await?;
+        let json = serde_json::to_string_pretty(links)?;
+        self.write_all(&mut file, json.into_bytes()).await
+    }
+
+    pub async fn load_implicit_links(&self) -> Result<Option<HashSet<(NoteId, NoteId)>>> {
+        let file = match self.links_file(false).await {
+            Ok(f) => f,
+            Err(_) => return Ok(None),
+        };
+        let data = self.read_all(&file).await?;
+        if data.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(serde_json::from_slice(&data)?))
+    }
+
     // Internals
 
     async fn read_note_file(&self, stem: &str) -> Result<StoredNote> {
@@ -345,6 +365,10 @@ impl Storage {
 
     async fn pins_file(&self, create: bool) -> Result<FileHandle> {
         self.state_file(PINS_FILE, create).await
+    }
+
+    async fn links_file(&self, create: bool) -> Result<FileHandle> {
+        self.state_file(LINKS_FILE, create).await
     }
 
     async fn state_file(&self, name: &str, create: bool) -> Result<FileHandle> {

@@ -121,3 +121,43 @@ fn duplicate_title_gets_deduped_stem() {
         assert!(stems.contains(&"Same Name 2"));
     });
 }
+
+#[test]
+fn implicit_links_roundtrip() {
+    runtime().block_on(async {
+        let (_guard, storage) = temp_storage().await;
+        let a = Note::new("alpha".into(), "body\n".into());
+        let b = Note::new("beta".into(), "body\n".into());
+        let pairs = [(a.id, b.id), (b.id, a.id)].into_iter().collect();
+
+        storage.save_implicit_links(&pairs).await.unwrap();
+        let loaded = storage.load_implicit_links().await.unwrap().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.contains(&(a.id, b.id)));
+        assert!(loaded.contains(&(b.id, a.id)));
+    });
+}
+
+#[test]
+fn implicit_links_empty_when_none_saved() {
+    runtime().block_on(async {
+        let (_guard, storage) = temp_storage().await;
+        let loaded = storage
+            .load_implicit_links()
+            .await
+            .unwrap()
+            .unwrap_or_default();
+        assert!(loaded.is_empty());
+    });
+}
+
+#[test]
+fn implicit_links_roundtrip_empty_set() {
+    runtime().block_on(async {
+        let (_guard, storage) = temp_storage().await;
+        let empty = std::collections::HashSet::new();
+        storage.save_implicit_links(&empty).await.unwrap();
+        let loaded = storage.load_implicit_links().await.unwrap_or_default();
+        assert_eq!(loaded, Some(empty));
+    });
+}

@@ -92,6 +92,26 @@ fn grid_path_covers_viewport_at_spacing() {
 }
 
 #[test]
+fn frame_card_centers_card_horizontally_at_reading_zoom() {
+    let cam = map::frame_card(1000.0, 600.0, 800.0, 600.0);
+    assert_eq!(cam.zoom, map::CARD_READING_ZOOM);
+    let left = cam.x;
+    let right = cam.x + 800.0 / cam.zoom;
+    assert!(((left + right) * 0.5 - 1000.0).abs() < 0.001);
+    let top = cam.y;
+    let bottom = cam.y + 600.0 / cam.zoom;
+    let center = (top + bottom) * 0.5;
+    assert!(((center - 600.0).abs() - 0.12 * 600.0 / cam.zoom).abs() < 0.001);
+}
+
+#[test]
+fn frame_card_scales_offsets_with_viewport_zoom() {
+    let cam = map::frame_card(0.0, 0.0, 400.0, 300.0);
+    assert_eq!(cam.x, -400.0 / map::CARD_READING_ZOOM * 0.5);
+    assert_eq!(cam.y, -300.0 / map::CARD_READING_ZOOM * 0.38);
+}
+
+#[test]
 fn grid_path_anchors_to_camera_and_clamps_density() {
     let cam = MapCamera {
         x: 5000.0,

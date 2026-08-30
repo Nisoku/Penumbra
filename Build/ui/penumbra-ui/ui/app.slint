@@ -2,6 +2,7 @@ import { Theme, BlockVM, NoteCardVM } from "theme.slint";
 import { TopBar } from "top-bar.slint";
 import { MapCanvas } from "map-canvas.slint";
 import { EditorPanel } from "editor-panel.slint";
+import { NewNotePill } from "new-note-pill.slint";
 
 export component AppWindow inherits Window {
     title: "Penumbra";
@@ -22,9 +23,17 @@ export component AppWindow inherits Window {
     in-out property <int> selected-note: -1;
     in property <[BlockVM]> editor-blocks: [];
     in property <bool> editor-open: false;
+    in property <string> editor-title: "";
+    in property <int> editor-focus-id: -1;
     callback open-editor(int);
     callback close-editor();
     callback editor-text-changed(int, string);
+    callback editor-title-changed(string);
+    callback editor-split(int, int);
+    callback editor-merge-up(int);
+    callback editor-undo();
+    callback editor-redo();
+    callback editor-move-active(int);
     callback open-note(int);
     callback camera-changed(length, length, float);
     callback note-selected(int);
@@ -38,7 +47,6 @@ export component AppWindow inherits Window {
         y: 0;
         width: parent.width;
         ready: root.ready;
-        new-note => { root.new-note(); }
     }
 
     MapCanvas {
@@ -70,9 +78,26 @@ export component AppWindow inherits Window {
         height: root.height - 52px;
         blocks: root.editor-blocks;
         open: root.editor-open;
+        note-title: root.editor-title;
+        focus-id: root.editor-focus-id;
         open-block(id) => { root.open-editor(id); }
         close => { root.close-editor(); }
         text-changed(id, text) => { root.editor-text-changed(id, text); }
+        title-changed(text) => { root.editor-title-changed(text); }
+        split(id, caret) => { root.editor-split(id, caret); }
+        merge-up(id) => { root.editor-merge-up(id); }
+        undo => { root.editor-undo(); }
+        redo => { root.editor-redo(); }
+        move-active(delta) => { root.editor-move-active(delta); }
+    }
+
+    NewNotePill {
+        x: parent.width - self.width - 24px;
+        y: parent.height - self.height - 24px;
+        enabled: root.ready && !root.editor-open;
+        visible: root.ready && !root.editor-open;
+        animate opacity { duration: 150ms; easing: ease-out; }
+        clicked => { root.new-note(); }
     }
 
     FocusScope {
