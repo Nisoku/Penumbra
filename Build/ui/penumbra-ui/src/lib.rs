@@ -1,39 +1,32 @@
 pub mod map;
-mod vault;
+mod platform;
 
 use std::collections::HashMap;
-#[cfg(not(target_family = "wasm"))]
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-#[cfg(not(target_family = "wasm"))]
 use crate::map::MapCamera;
+use futures::lock::Mutex as AsyncMutex;
 use penumbra_app::Universe;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_auto_link::AutoLinker;
 use penumbra_core::error::Result as PenumbraResult;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_core::note::Note;
 use penumbra_core::note::NoteId;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_core::position::Position;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_core::EmbeddingProvider;
 use penumbra_editor::doc::BlockKind;
 use penumbra_editor::session::{BlockEdit, EditorSession};
-#[cfg(not(target_family = "wasm"))]
 use penumbra_embed::SimpleEmbedder;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_index::VectorIndex;
-#[cfg(not(target_family = "wasm"))]
 use penumbra_layout::LayoutEngine;
 use penumbra_storage::Storage;
+use platform::Instant;
 use slint::ComponentHandle;
 use slint::Model;
-use tokio::sync::Mutex as AsyncMutex;
 
 slint::include_modules!();
 
@@ -47,27 +40,17 @@ const WELCOME_BODY: &str = "This is your first note.\n\nEverything you write lan
 
 const TOP_BAR_HEIGHT: f32 = 52.0;
 
-use std::time::Duration;
-#[cfg(not(target_family = "wasm"))]
-use std::time::Instant;
-
-#[cfg(not(target_family = "wasm"))]
 const DRIFT_DURATION: Duration = Duration::from_millis(600);
-#[cfg(not(target_family = "wasm"))]
 const DRIFT_TICK: Duration = Duration::from_millis(16);
-#[cfg(not(target_family = "wasm"))]
 const GLIDE_DURATION: Duration = Duration::from_millis(450);
-#[cfg(not(target_family = "wasm"))]
 const GLIDE_TICK: Duration = Duration::from_millis(16);
-#[cfg(not(target_family = "wasm"))]
 const GLIDE_EPSILON: f32 = 0.5;
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
+const PERSIST_INTERVAL: Duration = Duration::from_secs(2);
 
-#[cfg(not(target_family = "wasm"))]
 struct SharedState {
     universe: AsyncMutex<Option<Universe>>,
     layout: AsyncMutex<Option<LayoutEngine>>,
-    handle: tokio::runtime::Handle,
     cards: Mutex<Vec<NoteCardVM>>,
     links: Mutex<Vec<(i32, i32)>>,
     pins: Mutex<HashMap<i32, (f32, f32)>>,
@@ -85,35 +68,18 @@ struct SharedState {
     linker: Mutex<Option<Arc<AutoLinker>>>,
 }
 
-#[cfg(target_family = "wasm")]
-struct SharedState {
-    universe: AsyncMutex<Option<Universe>>,
-    cards: Mutex<Vec<NoteCardVM>>,
-    links: Mutex<Vec<(i32, i32)>>,
-    pins: Mutex<HashMap<i32, (f32, f32)>>,
-    selected: AtomicI32,
-    editor: Mutex<Option<EditorSession>>,
-    editor_note: Mutex<Option<NoteId>>,
-    editor_title: Mutex<Option<String>>,
-    editor_dirty: AtomicBool,
-    edit_pending: AtomicI32,
-}
-
-#[cfg(not(target_family = "wasm"))]
 struct DriftTarget {
     card_id: i32,
     from: (f32, f32),
     to: (f32, f32),
 }
 
-#[cfg(not(target_family = "wasm"))]
 struct Drift {
     items: Vec<DriftTarget>,
     started: Instant,
     duration: Duration,
 }
 
-#[cfg(not(target_family = "wasm"))]
 struct CameraGlide {
     from: MapCamera,
     to: MapCamera,
@@ -121,21 +87,15 @@ struct CameraGlide {
     duration: Duration,
 }
 
-#[cfg_attr(target_family = "wasm", wasm_bindgen::prelude::wasm_bindgen(start))]
 pub fn run() {
     start_app().expect("penumbra failed to start");
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    let state = Arc::new(SharedState {
+    let state = Rc::new(SharedState {
         universe: AsyncMutex::new(None),
         layout: AsyncMutex::new(None),
-        handle: runtime.handle().clone(),
         cards: Mutex::new(Vec::new()),
         links: Mutex::new(Vec::new()),
         pins: Mutex::new(HashMap::new()),
@@ -158,71 +118,37 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
     wire_open_note(&ui, &state);
     wire_map(&ui, &state);
 
-    {
-        let state = Arc::clone(&state);
-        runtime.spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(2));
-            loop {
-                interval.tick().await;
-                if !state.dirty.swap(false, Ordering::Relaxed) {
-                    continue;
-                }
-                persist_snapshot(&state).await;
-            }
+    // `_persist_timer` lives to the end of this scope, keeping the timer armed
+    // for the whole loop; dropping it after the loop exits unregisters it.
+    let _persist_timer = slint::Timer::default();
+    let timer_state = Rc::clone(&state);
+    _persist_timer.start(slint::TimerMode::Repeated, PERSIST_INTERVAL, move || {
+        let state = Rc::clone(&timer_state);
+        platform::spawn(async move {
+            persist_snapshot(&state).await;
         });
-    }
+    });
 
-    let boot_state = Arc::clone(&state);
+    // The first event-loop iteration arms boot so `platform::spawn` always
+    // runs with the loop already spinning. `single_shot` self-registers.
+    let boot_state = Rc::clone(&state);
     let boot_ui = ui.as_weak();
-    runtime.spawn(async move {
-        run_boot(boot_state, boot_ui).await;
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        let state = Rc::clone(&boot_state);
+        let ui = boot_ui.clone();
+        platform::spawn(async move {
+            run_boot(state, ui).await;
+        });
     });
 
     ui.run()?;
 
-    {
-        let state_ref = Arc::clone(&state);
-        runtime.block_on(async move {
-            persist_snapshot(&state_ref).await;
-        });
-    }
-
-    drop(runtime);
+    let state_ref = Rc::clone(&state);
+    platform::block_on(persist_snapshot(&state_ref));
     Ok(())
 }
 
-#[cfg(target_family = "wasm")]
-fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let ui = AppWindow::new()?;
-    let state = Arc::new(SharedState {
-        universe: AsyncMutex::new(None),
-        cards: Mutex::new(Vec::new()),
-        links: Mutex::new(Vec::new()),
-        pins: Mutex::new(HashMap::new()),
-        selected: AtomicI32::new(-1),
-        editor: Mutex::new(None),
-        editor_note: Mutex::new(None),
-        editor_title: Mutex::new(None),
-        editor_dirty: AtomicBool::new(false),
-        edit_pending: AtomicI32::new(0),
-    });
-
-    wire_new_note(&ui, &state);
-    wire_editor(&ui, &state);
-    wire_open_note(&ui, &state);
-    wire_map(&ui, &state);
-
-    let boot_state = Arc::clone(&state);
-    let boot_ui = ui.as_weak();
-    wasm_bindgen_futures::spawn_local(async move {
-        run_boot(boot_state, boot_ui).await;
-    });
-
-    ui.run()?;
-    Ok(())
-}
-
-async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
+async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
     set_status(&boot_ui, "loading embeddings...");
 
     #[cfg(feature = "candle-load")]
@@ -247,119 +173,89 @@ async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
 
             let count = universe.note_count();
 
-            #[cfg(not(target_family = "wasm"))]
-            {
-                let mut layout = LayoutEngine::with_defaults().await;
+            let mut layout = LayoutEngine::with_defaults().await;
 
-                let saved_positions = universe
-                    .storage()
-                    .load_positions()
-                    .await
-                    .unwrap_or_default();
-                let saved_pins = match universe.storage().load_pins().await {
-                    Ok(Some(set)) => set,
-                    _ => HashSet::new(),
-                };
+            let saved_positions = universe
+                .storage()
+                .load_positions()
+                .await
+                .unwrap_or_default();
+            let saved_pins = match universe.storage().load_pins().await {
+                Ok(Some(set)) => set,
+                _ => HashSet::new(),
+            };
 
-                for note in universe.graph().all_notes() {
-                    layout.add_node(note.id, saved_pins.contains(&note.id));
-                    if let Some(ref positions) = saved_positions {
-                        if let Some(&pos) = positions.get(&note.id) {
-                            layout.set_position(&note.id, pos);
-                        }
+            for note in universe.graph().all_notes() {
+                layout.add_node(note.id, saved_pins.contains(&note.id));
+                if let Some(ref positions) = saved_positions {
+                    if let Some(&pos) = positions.get(&note.id) {
+                        layout.set_position(&note.id, pos);
                     }
                 }
-
-                let graph_links: Vec<_> =
-                    universe.graph().all_links().into_iter().cloned().collect();
-                layout.update_links(graph_links.clone());
-                layout.run();
-
-                let graph_handle = universe.graph_handle();
-                let events = universe.events();
-                let embedder: Arc<dyn EmbeddingProvider> = Arc::new(SimpleEmbedder::new_384());
-                let index: Arc<Mutex<dyn VectorIndex>> = Arc::new(Mutex::new(
-                    penumbra_index::RuvectorIndex::new(384)
-                        .expect("index for the 384-dim embedder"),
-                ));
-                {
-                    let notes: Vec<Note> = universe.graph().all_notes().cloned().collect();
-                    for note in notes {
-                        let embedding = match embedder.embed_note(&note).await {
-                            Ok(embedding) => embedding,
-                            Err(e) => {
-                                tracing::warn!("embedding failed for {}: {e}", note.id);
-                                continue;
-                            }
-                        };
-                        let mut idx = index
-                            .lock()
-                            .expect("the boot pipeline index lock is uncontended");
-                        if let Err(e) = idx.insert(note.id, &embedding) {
-                            tracing::warn!("index insert failed for {}: {e}", note.id);
-                        }
-                    }
-                }
-                let linker = AutoLinker::with_defaults(
-                    Arc::clone(&embedder),
-                    Arc::clone(&index),
-                    graph_handle,
-                    events,
-                );
-                *state.embedder.lock().unwrap() = Some(embedder);
-                *state.linker.lock().unwrap() = Some(Arc::new(linker));
-
-                {
-                    let positions = layout.all_positions();
-                    let mut pins = state.pins.lock().unwrap();
-                    for note_id in &saved_pins {
-                        if let Some(&pos) = positions.get(note_id) {
-                            pins.insert(note_code(note_id), (pos.x as f32, pos.y as f32));
-                        }
-                    }
-                }
-
-                let cards = build_note_cards(&layout, &universe.graph(), &saved_pins);
-                let links: Vec<(i32, i32)> = graph_links
-                    .iter()
-                    .map(|link| (note_code(&link.source), note_code(&link.target)))
-                    .collect();
-                *state.layout.lock().await = Some(layout);
-                *state.universe.lock().await = Some(universe);
-
-                let boot_state = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = boot_ui.upgrade() {
-                        ui.set_ready(true);
-                        ui.set_status(format!("universe ready - {} notes", count).into());
-                        publish_visuals(&boot_state, &ui, cards, links);
-                        center_camera_on_cards(&boot_state, &ui);
-                        rebuild_paths(&boot_state, &ui);
-                    }
-                });
             }
 
-            #[cfg(target_family = "wasm")]
-            {
-                let cards = build_note_cards_fallback(&universe);
-                let graph_links: Vec<_> =
-                    universe.graph().all_links().into_iter().cloned().collect();
-                let links: Vec<(i32, i32)> = graph_links
-                    .iter()
-                    .map(|link| (note_code(&link.source), note_code(&link.target)))
-                    .collect();
-                *state.universe.lock().await = Some(universe);
+            let graph_links: Vec<_> = universe.graph().all_links().into_iter().cloned().collect();
+            layout.update_links(graph_links.clone());
+            layout.run();
 
-                let boot_state = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = boot_ui.upgrade() {
-                        ui.set_ready(true);
-                        ui.set_status(format!("universe ready - {} notes", count).into());
-                        publish_visuals(&boot_state, &ui, cards, links);
-                        center_camera_on_cards(&boot_state, &ui);
-                        rebuild_paths(&boot_state, &ui);
+            let graph_handle = universe.graph_handle();
+            let events = universe.events();
+            let embedder: Arc<dyn EmbeddingProvider> = Arc::new(SimpleEmbedder::new_384());
+            let index: Arc<Mutex<dyn VectorIndex>> = Arc::new(Mutex::new(
+                penumbra_index::RuvectorIndex::new(384).expect("index for the 384-dim embedder"),
+            ));
+            {
+                let notes: Vec<Note> = universe.graph().all_notes().cloned().collect();
+                for note in notes {
+                    let embedding = match embedder.embed_note(&note).await {
+                        Ok(embedding) => embedding,
+                        Err(e) => {
+                            tracing::warn!("embedding failed for {}: {e}", note.id);
+                            continue;
+                        }
+                    };
+                    let mut idx = index
+                        .lock()
+                        .expect("the boot pipeline index lock is uncontended");
+                    if let Err(e) = idx.insert(note.id, &embedding) {
+                        tracing::warn!("index insert failed for {}: {e}", note.id);
                     }
-                });
+                }
+            }
+            let linker = AutoLinker::with_defaults(
+                Arc::clone(&embedder),
+                Arc::clone(&index),
+                graph_handle,
+                events,
+            );
+            *state.embedder.lock().unwrap() = Some(embedder);
+            *state.linker.lock().unwrap() = Some(Arc::new(linker));
+
+            {
+                let positions = layout.all_positions();
+                let mut pins = state.pins.lock().unwrap();
+                for note_id in &saved_pins {
+                    if let Some(&pos) = positions.get(note_id) {
+                        pins.insert(note_code(note_id), (pos.x as f32, pos.y as f32));
+                    }
+                }
+            }
+
+            let cards = build_note_cards(&layout, &universe.graph(), &saved_pins);
+            let links: Vec<(i32, i32)> = graph_links
+                .iter()
+                .map(|link| (note_code(&link.source), note_code(&link.target)))
+                .collect();
+            *state.layout.lock().await = Some(layout);
+            *state.universe.lock().await = Some(universe);
+
+            let boot_state = Rc::clone(&state);
+            if let Some(ui) = boot_ui.upgrade() {
+                ui.set_ready(true);
+                ui.set_status(format!("universe ready - {} notes", count).into());
+                publish_visuals(&boot_state, &ui, cards, links);
+                center_camera_on_cards(&boot_state, &ui);
+                rebuild_paths(&boot_state, &ui);
             }
         }
         Err(err) => report_boot_failure(boot_ui, &err.to_string()),
@@ -367,22 +263,17 @@ async fn run_boot(state: Arc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
 }
 
 fn set_status(ui: &slint::Weak<AppWindow>, msg: &str) {
-    let ui = ui.clone();
-    let msg = msg.to_owned();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(ui) = ui.upgrade() {
-            ui.set_status(msg.into());
-        }
-    });
+    if let Some(ui) = ui.upgrade() {
+        ui.set_status(msg.into());
+    }
 }
 
 async fn boot_universe() -> PenumbraResult<Universe> {
-    let root = vault::resolve_root().await?;
+    let root = platform::vault_root().await?;
     let storage = Storage::with_dir(root).await;
     Universe::open(storage).await
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn build_note_cards(
     layout: &LayoutEngine,
     graph: &penumbra_graph::GraphStore,
@@ -415,39 +306,10 @@ fn build_note_cards(
         .collect()
 }
 
-#[cfg(target_family = "wasm")]
-fn build_note_cards_fallback(universe: &Universe) -> Vec<NoteCardVM> {
-    universe
-        .graph()
-        .all_notes()
-        .enumerate()
-        .map(|(i, note)| {
-            let col = (i % 5) as f32;
-            let row = (i / 5) as f32;
-            NoteCardVM {
-                id: note_code(&note.id),
-                title: note.title.as_str().into(),
-                preview: note
-                    .body
-                    .chars()
-                    .take(80)
-                    .collect::<String>()
-                    .as_str()
-                    .into(),
-                tags: note.tags.join(", ").as_str().into(),
-                pinned: false,
-                x: 24.0 + col * 200.0,
-                y: 24.0 + row * 140.0,
-            }
-        })
-        .collect()
-}
-
 fn note_code(id: &NoteId) -> i32 {
     id.as_uuid().as_u128() as i32
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn pinned_note_ids(universe: &Universe, pin_codes: &HashSet<i32>) -> HashSet<NoteId> {
     universe
         .graph()
@@ -457,7 +319,6 @@ fn pinned_note_ids(universe: &Universe, pin_codes: &HashSet<i32>) -> HashSet<Not
         .collect()
 }
 
-#[cfg(not(target_family = "wasm"))]
 async fn persist_snapshot(state: &SharedState) {
     let mut layout_guard = state.layout.lock().await;
     let universe_guard = state.universe.lock().await;
@@ -475,7 +336,7 @@ async fn persist_snapshot(state: &SharedState) {
 }
 
 async fn load_note_for_editor(
-    state: &Arc<SharedState>,
+    state: &Rc<SharedState>,
     card_id: i32,
 ) -> Option<(NoteId, String, String)> {
     let guard = state.universe.lock().await;
@@ -491,58 +352,40 @@ async fn load_note_for_editor(
     Some((note_id, title, body))
 }
 
-fn wire_open_note(ui: &AppWindow, state: &Arc<SharedState>) {
-    let state = Arc::clone(state);
+fn wire_open_note(ui: &AppWindow, state: &Rc<SharedState>) {
+    let state = Rc::clone(state);
     let handle = ui.as_weak();
     ui.on_open_note(move |card_id| {
-        let state_outer = Arc::clone(&state);
-        let state_task = Arc::clone(&state_outer);
+        let state_outer = Rc::clone(&state);
+        let state_task = Rc::clone(&state_outer);
         let ui = handle.clone();
-        spawn_state_task(&state_outer, async move {
+        platform::spawn(async move {
             let Some((note_id, title, body)) = load_note_for_editor(&state_task, card_id).await
             else {
                 set_status(&ui, "note not found");
                 return;
             };
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui.upgrade() {
-                    begin_editor_session(&state_task, &ui, note_id, title, body, card_id);
-                }
-            });
-        });
-    });
-}
-
-#[cfg(not(target_family = "wasm"))]
-fn wire_new_note(ui: &AppWindow, state: &Arc<SharedState>) {
-    let state = Arc::clone(state);
-    let handle = ui.as_weak();
-    ui.on_new_note(move || {
-        let state = Arc::clone(&state);
-        let ui = handle.clone();
-        state.handle.spawn({
-            let state = Arc::clone(&state);
-            async move {
-                new_note_task(state, ui).await;
+            if let Some(ui) = ui.upgrade() {
+                begin_editor_session(&state_task, &ui, note_id, title, body, card_id);
             }
         });
     });
 }
 
-#[cfg(target_family = "wasm")]
-fn wire_new_note(ui: &AppWindow, state: &Arc<SharedState>) {
-    let state = Arc::clone(state);
+fn wire_new_note(ui: &AppWindow, state: &Rc<SharedState>) {
+    let state = Rc::clone(state);
     let handle = ui.as_weak();
     ui.on_new_note(move || {
-        let state = Arc::clone(&state);
+        let state = Rc::clone(&state);
         let ui = handle.clone();
-        wasm_bindgen_futures::spawn_local(async move {
+        platform::spawn(async move {
             new_note_task(state, ui).await;
         });
     });
 }
 
-async fn new_note_task(state: Arc<SharedState>, ui: slint::Weak<AppWindow>) {
+async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
+    let mut layout_guard = state.layout.lock().await;
     let mut guard = state.universe.lock().await;
     let Some(universe) = guard.as_mut() else {
         return;
@@ -553,61 +396,32 @@ async fn new_note_task(state: Arc<SharedState>, ui: slint::Weak<AppWindow>) {
     {
         Ok(_id) => {
             let count = universe.note_count();
-
-            #[cfg(not(target_family = "wasm"))]
-            {
-                let mut layout_guard = state.layout.lock().await;
-                if let Some(ref mut layout) = *layout_guard {
-                    layout.add_node(_id, false);
-                    let graph_links: Vec<_> =
-                        universe.graph().all_links().into_iter().cloned().collect();
-                    layout.update_links(graph_links.clone());
-                    layout.step();
-                    let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
-                    let pinned_ids = pinned_note_ids(universe, &pin_codes);
-                    let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
-                    let links: Vec<(i32, i32)> = graph_links
-                        .iter()
-                        .map(|link| (note_code(&link.source), note_code(&link.target)))
-                        .collect();
-                    drop(guard);
-                    drop(layout_guard);
-                    let state = Arc::clone(&state);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = ui.upgrade() {
-                            ui.set_status(format!("universe ready - {} notes", count).into());
-                            publish_visuals(&state, &ui, cards, links);
-                        }
-                    });
-                }
-            }
-
-            #[cfg(target_family = "wasm")]
-            {
-                let cards = build_note_cards_fallback(universe);
+            if let Some(ref mut layout) = *layout_guard {
+                layout.add_node(_id, false);
                 let graph_links: Vec<_> =
                     universe.graph().all_links().into_iter().cloned().collect();
+                layout.update_links(graph_links.clone());
+                layout.step();
+                let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
+                let pinned_ids = pinned_note_ids(universe, &pin_codes);
+                let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
                 let links: Vec<(i32, i32)> = graph_links
                     .iter()
                     .map(|link| (note_code(&link.source), note_code(&link.target)))
                     .collect();
                 drop(guard);
-                let state = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui.upgrade() {
-                        ui.set_status(format!("universe ready - {} notes", count).into());
-                        publish_visuals(&state, &ui, cards, links);
-                    }
-                });
+                drop(layout_guard);
+                if let Some(ui) = ui.upgrade() {
+                    ui.set_status(format!("universe ready - {} notes", count).into());
+                    publish_visuals(&state, &ui, cards, links);
+                }
             }
         }
         Err(err) => {
             let message = format!("could not save note: {}", err);
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui.upgrade() {
-                    ui.set_status(message.into());
-                }
-            });
+            if let Some(ui) = ui.upgrade() {
+                ui.set_status(message.into());
+            }
         }
     }
 }
@@ -638,32 +452,34 @@ fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
 
 fn block_kind_name(kind: &BlockKind) -> &'static str {
     match kind {
-        BlockKind::Paragraph => "paragraph",
-        BlockKind::Heading(_) => "heading",
-        BlockKind::Quote => "quote",
+        BlockKind::Paragraph(_) => "paragraph",
+        BlockKind::Heading { .. } => "heading",
+        BlockKind::Quote(_) => "quote",
         BlockKind::List { .. } => "list",
-        BlockKind::CodeBlock(_) => "code",
+        BlockKind::CodeBlock { .. } => "code",
         BlockKind::ThematicBreak => "break",
-        BlockKind::Table => "table",
+        BlockKind::Table(_) => "table",
+        BlockKind::HtmlBlock(_) => "html",
+        BlockKind::FootnoteDefinition { .. } => "footnote",
     }
 }
 
 fn block_heading_level(block: &BlockEdit) -> u8 {
     match &block.kind {
-        BlockKind::Heading(level) => *level,
+        BlockKind::Heading { level, .. } => *level,
         _ => 0,
     }
 }
 
 fn block_display_text(block: &BlockEdit) -> String {
     match &block.kind {
-        BlockKind::Heading(_) => block
+        BlockKind::Heading { .. } => block
             .text
             .trim_start()
             .trim_start_matches('#')
             .trim_start()
             .to_owned(),
-        BlockKind::Quote => block
+        BlockKind::Quote(_) => block
             .text
             .lines()
             .map(|line| {
@@ -680,7 +496,7 @@ fn block_display_text(block: &BlockEdit) -> String {
 }
 
 fn begin_editor_session(
-    state: &Arc<SharedState>,
+    state: &Rc<SharedState>,
     ui: &AppWindow,
     note_id: NoteId,
     title: String,
@@ -697,8 +513,7 @@ fn begin_editor_session(
     frame_editor_entry(state, ui, card_id);
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn frame_editor_entry(state: &Arc<SharedState>, ui: &AppWindow, card_id: i32) {
+fn frame_editor_entry(state: &Rc<SharedState>, ui: &AppWindow, card_id: i32) {
     let cards = state.cards.lock().unwrap();
     let Some(card) = cards.iter().find(|card| card.id == card_id) else {
         return;
@@ -717,12 +532,7 @@ fn frame_editor_entry(state: &Arc<SharedState>, ui: &AppWindow, card_id: i32) {
     start_camera_glide(state, ui, target);
 }
 
-#[cfg(target_family = "wasm")]
-fn frame_editor_entry(_state: &Arc<SharedState>, ui: &AppWindow, _card_id: i32) {
-    ui.window().request_redraw();
-}
-
-fn finish_editor_session(state: &Arc<SharedState>, ui: &AppWindow) {
+fn finish_editor_session(state: &Rc<SharedState>, ui: &AppWindow) {
     let pending: Option<(NoteId, String, String)> =
         if state.editor_dirty.swap(false, Ordering::Relaxed) {
             let editor = state.editor.lock().unwrap();
@@ -744,47 +554,39 @@ fn finish_editor_session(state: &Arc<SharedState>, ui: &AppWindow) {
     ui.set_editor_open(false);
     ui.set_editor_blocks(slint::ModelRc::default());
     if let Some((note_id, body, title)) = pending {
-        let state_inner = Arc::clone(state);
+        let state_inner = Rc::clone(state);
         let uiw = ui.as_weak();
-        spawn_state_task(state, async move {
+        platform::spawn(async move {
             apply_editor_save(&state_inner, &uiw, note_id, body, title).await;
         });
     }
     restore_editor_camera(state, ui);
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn restore_editor_camera(state: &Arc<SharedState>, ui: &AppWindow) {
+fn restore_editor_camera(state: &Rc<SharedState>, ui: &AppWindow) {
     if let Some(prev) = state.editor_prev_camera.lock().unwrap().take() {
         start_camera_glide(state, ui, prev);
     }
 }
 
-#[cfg(target_family = "wasm")]
-fn restore_editor_camera(_state: &Arc<SharedState>, _ui: &AppWindow) {}
-
-#[cfg(not(target_family = "wasm"))]
-fn cancel_camera_glide(state: &Arc<SharedState>) {
+fn cancel_camera_glide(state: &Rc<SharedState>) {
     *state.glide.lock().unwrap() = None;
 }
 
-#[cfg(target_family = "wasm")]
-fn cancel_camera_glide(_state: &Arc<SharedState>) {}
-
-fn schedule_editor_save(state: &Arc<SharedState>, ui: slint::Weak<AppWindow>) {
+fn schedule_editor_save(state: &Rc<SharedState>, ui: slint::Weak<AppWindow>) {
     state.editor_dirty.store(true, Ordering::Relaxed);
     let epoch = state.edit_pending.fetch_add(1, Ordering::Relaxed) + 1;
-    let state = Arc::clone(state);
+    let state = Rc::clone(state);
     slint::Timer::single_shot(SAVE_DEBOUNCE, move || {
         if state.edit_pending.load(Ordering::Relaxed) != epoch {
             return;
         }
-        let state_task = Arc::clone(&state);
-        spawn_state_task(&state, flush_editor_changes(state_task, ui));
+        let state_task = Rc::clone(&state);
+        platform::spawn(flush_editor_changes(state_task, ui));
     });
 }
 
-async fn flush_editor_changes(state: Arc<SharedState>, ui: slint::Weak<AppWindow>) {
+async fn flush_editor_changes(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
     if !state.editor_dirty.swap(false, Ordering::Relaxed) {
         return;
     }
@@ -803,42 +605,38 @@ async fn flush_editor_changes(state: Arc<SharedState>, ui: slint::Weak<AppWindow
 }
 
 async fn apply_editor_save(
-    state: &Arc<SharedState>,
+    state: &Rc<SharedState>,
     ui: &slint::Weak<AppWindow>,
     note_id: NoteId,
     body: String,
     title: String,
 ) {
-    let mut universe_guard = state.universe.lock().await;
-    let Some(universe) = universe_guard.as_mut() else {
-        return;
-    };
-    let mut note = match universe.graph().get_note(&note_id) {
-        Some(note) => note.clone(),
-        None => {
-            set_status(ui, "note disappeared");
+    let note = {
+        let mut universe_guard = state.universe.lock().await;
+        let Some(universe) = universe_guard.as_mut() else {
+            return;
+        };
+        let mut note = match universe.graph().get_note(&note_id) {
+            Some(note) => note.clone(),
+            None => {
+                set_status(ui, "note disappeared");
+                return;
+            }
+        };
+        note.body = body;
+        note.title = title;
+        note.touch();
+        if let Err(e) = universe.save_note(note.clone()).await {
+            set_status(ui, &format!("could not save note: {e}"));
             return;
         }
+        note
     };
-    note.body = body;
-    note.title = title;
-    note.touch();
-    if let Err(e) = universe.save_note(note.clone()).await {
-        set_status(ui, &format!("could not save note: {e}"));
-        return;
-    }
-    #[cfg(not(target_family = "wasm"))]
-    run_pipeline(state, universe, ui, note).await;
+    run_pipeline(state, ui, note).await;
     set_status(ui, "saved");
 }
 
-#[cfg(not(target_family = "wasm"))]
-async fn run_pipeline(
-    state: &Arc<SharedState>,
-    universe: &mut Universe,
-    ui: &slint::Weak<AppWindow>,
-    note: Note,
-) {
+async fn run_pipeline(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, note: Note) {
     let mut layout_guard = state.layout.lock().await;
     let Some(layout) = layout_guard.as_mut() else {
         return;
@@ -855,61 +653,49 @@ async fn run_pipeline(
         }
     }
 
-    if let Err(e) = universe
-        .storage()
-        .save_implicit_links(&universe.implicit_link_pairs())
-        .await
     {
-        tracing::error!("failed to save implicit links: {e}");
-    }
+        let mut universe_guard = state.universe.lock().await;
+        let Some(universe) = universe_guard.as_mut() else {
+            return;
+        };
 
-    let graph_links: Vec<_> = universe.graph().all_links().into_iter().cloned().collect();
-    layout.update_links(graph_links.clone());
-    layout.step_neighborhood(&note.id);
-
-    let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
-    let pinned_ids = pinned_note_ids(universe, &pin_codes);
-    let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
-    let links: Vec<(i32, i32)> = graph_links
-        .iter()
-        .map(|link| (note_code(&link.source), note_code(&link.target)))
-        .collect();
-    let settled: Vec<(i32, (f32, f32))> = layout
-        .all_positions()
-        .iter()
-        .map(|(note_id, position)| (note_code(note_id), (position.x as f32, position.y as f32)))
-        .collect();
-    drop(layout_guard);
-
-    let state = Arc::clone(state);
-    let ui = ui.clone();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(ui) = ui.upgrade() {
-            publish_visuals(&state, &ui, cards, links);
-            publish_drift(&state, &ui, settled);
+        if let Err(e) = universe
+            .storage()
+            .save_implicit_links(&universe.implicit_link_pairs())
+            .await
+        {
+            tracing::error!("failed to save implicit links: {e}");
         }
-    });
+
+        let graph_links: Vec<_> = universe.graph().all_links().into_iter().cloned().collect();
+        layout.update_links(graph_links.clone());
+        layout.step_neighborhood(&note.id);
+
+        let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
+        let pinned_ids = pinned_note_ids(universe, &pin_codes);
+        let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
+        let links: Vec<(i32, i32)> = graph_links
+            .iter()
+            .map(|link| (note_code(&link.source), note_code(&link.target)))
+            .collect();
+        let settled: Vec<(i32, (f32, f32))> = layout
+            .all_positions()
+            .iter()
+            .map(|(note_id, position)| (note_code(note_id), (position.x as f32, position.y as f32)))
+            .collect();
+        drop(universe_guard);
+        drop(layout_guard);
+
+        if let Some(ui) = ui.upgrade() {
+            publish_visuals(state, &ui, cards, links);
+            publish_drift(state, &ui, settled);
+        }
+    }
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn spawn_state_task(
-    state: &Arc<SharedState>,
-    future: impl std::future::Future<Output = ()> + Send + 'static,
-) {
-    state.handle.spawn(future);
-}
-
-#[cfg(target_family = "wasm")]
-fn spawn_state_task(
-    _state: &Arc<SharedState>,
-    future: impl std::future::Future<Output = ()> + 'static,
-) {
-    wasm_bindgen_futures::spawn_local(future);
-}
-
-fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
+fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_open_editor(move |block_id| {
             let Some(ui) = handle.upgrade() else {
@@ -925,7 +711,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_close_editor(move || {
             let Some(ui) = handle.upgrade() else {
@@ -936,7 +722,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_text_changed(move |block_id, text| {
             let mut guard = state.editor.lock().unwrap();
@@ -953,7 +739,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_title_changed(move |text| {
             *state.editor_title.lock().unwrap() = Some(text.into());
@@ -962,7 +748,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_split(move |block_id, caret| {
             let Some(ui) = handle.upgrade() else {
@@ -983,7 +769,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_merge_up(move |block_id| {
             let Some(ui) = handle.upgrade() else {
@@ -1004,7 +790,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_undo(move || {
             let Some(ui) = handle.upgrade() else {
@@ -1021,7 +807,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_redo(move || {
             let Some(ui) = handle.upgrade() else {
@@ -1038,7 +824,7 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_move_active(move |delta| {
             let Some(ui) = handle.upgrade() else {
@@ -1055,9 +841,9 @@ fn wire_editor(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 }
 
-fn wire_map(ui: &AppWindow, state: &Arc<SharedState>) {
+fn wire_map(ui: &AppWindow, state: &Rc<SharedState>) {
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_camera_changed(move |_, _, _| {
             cancel_camera_glide(&state);
@@ -1069,7 +855,7 @@ fn wire_map(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_note_selected(move |card_id| {
             state.selected.store(card_id, Ordering::Relaxed);
@@ -1081,10 +867,9 @@ fn wire_map(ui: &AppWindow, state: &Arc<SharedState>) {
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_note_moved(move |card_id, x, y| {
-            #[cfg(not(target_family = "wasm"))]
             state.dirty.store(true, Ordering::Relaxed);
             apply_card_visual(&state, card_id, x, y);
             let Some(ui) = handle.upgrade() else {
@@ -1094,9 +879,8 @@ fn wire_map(ui: &AppWindow, state: &Arc<SharedState>) {
         });
     }
 
-    #[cfg(not(target_family = "wasm"))]
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_note_released(move |card_id, x, y| {
             let pin_pos = state.pins.lock().unwrap().get(&card_id).copied();
@@ -1107,82 +891,59 @@ fn wire_map(ui: &AppWindow, state: &Arc<SharedState>) {
                 publish_drift(&state, &ui, vec![(card_id, pin_pos)]);
                 return;
             }
-            let state = Arc::clone(&state);
+            let state = Rc::clone(&state);
             let handle = handle.clone();
-            let spawn_handle = state.handle.clone();
-            spawn_handle.spawn(async move {
+            platform::spawn(async move {
                 if let Some(settled) = settle_note(state.clone(), card_id, (x, y)).await {
-                    let handle = handle.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = handle.upgrade() {
-                            publish_drift(&state, &ui, settled);
-                        }
-                    });
+                    if let Some(ui) = handle.upgrade() {
+                        publish_drift(&state, &ui, settled);
+                    }
                 }
             });
         });
     }
 
-    #[cfg(target_family = "wasm")]
-    ui.on_note_released(|_card_id, _x, _y| {});
-
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_note_pinned(move |card_id, x, y| {
-            #[cfg(not(target_family = "wasm"))]
             state.dirty.store(true, Ordering::Relaxed);
             set_card_pinned(&state, card_id, true, (x, y));
             let Some(ui) = handle.upgrade() else {
                 return;
             };
             rebuild_paths(&state, &ui);
-            #[cfg(not(target_family = "wasm"))]
-            {
-                let state = Arc::clone(&state);
-                let handle = handle.clone();
-                let spawn_handle = state.handle.clone();
-                spawn_handle.spawn(async move {
-                    if let Some(settled) = pin_note(state.clone(), card_id, (x, y)).await {
-                        let handle = handle.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle.upgrade() {
-                                publish_drift(&state, &ui, settled);
-                            }
-                        });
+            let state = Rc::clone(&state);
+            let handle = handle.clone();
+            platform::spawn(async move {
+                if let Some(settled) = pin_note(state.clone(), card_id, (x, y)).await {
+                    if let Some(ui) = handle.upgrade() {
+                        publish_drift(&state, &ui, settled);
                     }
-                });
-            }
+                }
+            });
         });
     }
 
     {
-        let state = Arc::clone(state);
+        let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_note_unpinned(move |card_id| {
-            #[cfg(not(target_family = "wasm"))]
             state.dirty.store(true, Ordering::Relaxed);
             set_card_pinned(&state, card_id, false, (0.0, 0.0));
             let Some(ui) = handle.upgrade() else {
                 return;
             };
             rebuild_paths(&state, &ui);
-            #[cfg(not(target_family = "wasm"))]
-            {
-                let state = Arc::clone(&state);
-                let handle = handle.clone();
-                let spawn_handle = state.handle.clone();
-                spawn_handle.spawn(async move {
-                    if let Some(settled) = unpin_note(state.clone(), card_id).await {
-                        let handle = handle.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = handle.upgrade() {
-                                publish_drift(&state, &ui, settled);
-                            }
-                        });
+            let state = Rc::clone(&state);
+            let handle = handle.clone();
+            platform::spawn(async move {
+                if let Some(settled) = unpin_note(state.clone(), card_id).await {
+                    if let Some(ui) = handle.upgrade() {
+                        publish_drift(&state, &ui, settled);
                     }
-                });
-            }
+                }
+            });
         });
     }
 }
@@ -1271,7 +1032,6 @@ fn center_camera_on_cards(state: &SharedState, ui: &AppWindow) {
     ui.set_camera_y(center_y - view_h * 0.5);
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn viewport_size(ui: &AppWindow) -> (f32, f32) {
     let window = ui.window();
     let size = window.size();
@@ -1282,8 +1042,7 @@ fn viewport_size(ui: &AppWindow) -> (f32, f32) {
     )
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn start_camera_glide(state: &Arc<SharedState>, ui: &AppWindow, to: MapCamera) {
+fn start_camera_glide(state: &Rc<SharedState>, ui: &AppWindow, to: MapCamera) {
     let from = MapCamera {
         x: ui.get_camera_x(),
         y: ui.get_camera_y(),
@@ -1298,9 +1057,8 @@ fn start_camera_glide(state: &Arc<SharedState>, ui: &AppWindow, to: MapCamera) {
     arm_glide_tick(state, ui);
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn arm_glide_tick(state: &Arc<SharedState>, ui: &AppWindow) {
-    let state = Arc::clone(state);
+fn arm_glide_tick(state: &Rc<SharedState>, ui: &AppWindow) {
+    let state = Rc::clone(state);
     let handle = ui.as_weak();
     slint::Timer::single_shot(GLIDE_TICK, move || {
         let Some(ui) = handle.upgrade() else {
@@ -1310,8 +1068,7 @@ fn arm_glide_tick(state: &Arc<SharedState>, ui: &AppWindow) {
     });
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn glide_step(state: &Arc<SharedState>, ui: &AppWindow) {
+fn glide_step(state: &Rc<SharedState>, ui: &AppWindow) {
     let finished = {
         let mut guard = state.glide.lock().unwrap();
         let Some(glide) = guard.as_mut() else {
@@ -1369,9 +1126,8 @@ fn rebuild_paths(state: &SharedState, ui: &AppWindow) {
     ui.set_selected_edge_path(edges.selected.into());
 }
 
-#[cfg(not(target_family = "wasm"))]
 async fn settle_note(
-    state: Arc<SharedState>,
+    state: Rc<SharedState>,
     card_id: i32,
     pos: (f32, f32),
 ) -> Option<Vec<(i32, (f32, f32))>> {
@@ -1395,9 +1151,8 @@ async fn settle_note(
     )
 }
 
-#[cfg(not(target_family = "wasm"))]
 async fn pin_note(
-    state: Arc<SharedState>,
+    state: Rc<SharedState>,
     card_id: i32,
     pos: (f32, f32),
 ) -> Option<Vec<(i32, (f32, f32))>> {
@@ -1422,8 +1177,7 @@ async fn pin_note(
     )
 }
 
-#[cfg(not(target_family = "wasm"))]
-async fn unpin_note(state: Arc<SharedState>, card_id: i32) -> Option<Vec<(i32, (f32, f32))>> {
+async fn unpin_note(state: Rc<SharedState>, card_id: i32) -> Option<Vec<(i32, (f32, f32))>> {
     let mut layout_guard = state.layout.lock().await;
     let mut universe_guard = state.universe.lock().await;
     let layout = layout_guard.as_mut()?;
@@ -1444,8 +1198,7 @@ async fn unpin_note(state: Arc<SharedState>, card_id: i32) -> Option<Vec<(i32, (
     )
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn publish_drift(state: &Arc<SharedState>, ui: &AppWindow, settled: Vec<(i32, (f32, f32))>) {
+fn publish_drift(state: &Rc<SharedState>, ui: &AppWindow, settled: Vec<(i32, (f32, f32))>) {
     let cards = state.cards.lock().unwrap();
     let mut items = Vec::new();
     for (card_id, (sx, sy)) in settled {
@@ -1472,9 +1225,8 @@ fn publish_drift(state: &Arc<SharedState>, ui: &AppWindow, settled: Vec<(i32, (f
     arm_drift_tick(state, ui);
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn arm_drift_tick(state: &Arc<SharedState>, ui: &AppWindow) {
-    let state = Arc::clone(state);
+fn arm_drift_tick(state: &Rc<SharedState>, ui: &AppWindow) {
+    let state = Rc::clone(state);
     let handle = ui.as_weak();
     slint::Timer::single_shot(DRIFT_TICK, move || {
         let Some(ui) = handle.upgrade() else {
@@ -1484,8 +1236,7 @@ fn arm_drift_tick(state: &Arc<SharedState>, ui: &AppWindow) {
     });
 }
 
-#[cfg(not(target_family = "wasm"))]
-fn drift_step(state: &Arc<SharedState>, ui: &AppWindow) {
+fn drift_step(state: &Rc<SharedState>, ui: &AppWindow) {
     let finished = {
         let mut guard = state.drift.lock().unwrap();
         let Some(drift) = guard.as_mut() else {
@@ -1510,7 +1261,6 @@ fn drift_step(state: &Arc<SharedState>, ui: &AppWindow) {
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 fn ease_in_out_cubic(t: f32) -> f32 {
     if t < 0.5 {
         4.0 * t * t * t
@@ -1521,9 +1271,7 @@ fn ease_in_out_cubic(t: f32) -> f32 {
 
 fn report_boot_failure(ui: slint::Weak<AppWindow>, message: &str) {
     let text = format!("could not open universe: {}", message);
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(ui) = ui.upgrade() {
-            ui.set_status(text.into());
-        }
-    });
+    if let Some(ui) = ui.upgrade() {
+        ui.set_status(text.into());
+    }
 }

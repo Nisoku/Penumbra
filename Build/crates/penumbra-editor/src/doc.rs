@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use penumbra_markdown::ast::BlockId;
+pub use penumbra_markdown::ast::{BlockId, BlockKind};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StyledSpan {
@@ -9,17 +9,6 @@ pub struct StyledSpan {
     pub italic: bool,
     pub strikethrough: bool,
     pub code: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum BlockKind {
-    Paragraph,
-    Heading(u8),
-    CodeBlock(Option<String>),
-    List { ordered: bool },
-    Quote,
-    ThematicBreak,
-    Table,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,12 +56,11 @@ fn convert_blocks(md_blocks: &[penumbra_markdown::ast::Block], source: &str) -> 
 
     for md_block in md_blocks {
         let (start, end) = find_block_range(source, offset, md_block);
-        let kind = block_kind(&md_block.kind);
         let spans = extract_spans(&md_block.kind);
 
         result.push(Block {
             id: md_block.id,
-            kind,
+            kind: md_block.kind.clone(),
             source_range: (start, end),
             spans,
         });
@@ -110,23 +98,6 @@ fn find_block_range(
     }
 
     (start, end)
-}
-
-fn block_kind(md_block: &penumbra_markdown::ast::BlockKind) -> BlockKind {
-    match md_block {
-        penumbra_markdown::ast::BlockKind::Paragraph(_) => BlockKind::Paragraph,
-        penumbra_markdown::ast::BlockKind::Heading { level, .. } => BlockKind::Heading(*level),
-        penumbra_markdown::ast::BlockKind::CodeBlock { language, .. } => {
-            BlockKind::CodeBlock(language.clone())
-        }
-        penumbra_markdown::ast::BlockKind::List { ordered, .. } => {
-            BlockKind::List { ordered: *ordered }
-        }
-        penumbra_markdown::ast::BlockKind::Quote(_) => BlockKind::Quote,
-        penumbra_markdown::ast::BlockKind::ThematicBreak => BlockKind::ThematicBreak,
-        penumbra_markdown::ast::BlockKind::Table(_) => BlockKind::Table,
-        _ => BlockKind::Paragraph,
-    }
 }
 
 fn extract_spans(md_block: &penumbra_markdown::ast::BlockKind) -> Vec<StyledSpan> {

@@ -1,24 +1,38 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 use async_trait::async_trait;
 use penumbra_core::embed::{Embedding, EmbeddingProvider};
 use penumbra_core::error::Result;
 
+/// N-gram order used by [`SimpleEmbedder`].
+const NGRAM: usize = 3;
+
+/// FNV-1a 64-bit offset basis.
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a 64-bit prime.
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// Deterministic 64-bit FNV-1a hash over `bytes`.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = FNV_OFFSET_BASIS;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
 /// A lightweight embedder that produces deterministic embeddings from text
-/// using character n-gram hashing.
+/// using character n-gram feature hashing.
 ///
 /// This is not semantically meaningful. It exists for development, testing,
-/// and environments where the Candle ML pipeline is unavailable. The output
-/// is a fixed-dimension vector where each position is a hash of an n-gram
-/// from the input.
+/// and environments where the Candle ML pipeline is unavailable.
 pub struct SimpleEmbedder {
     dims: usize,
 }
 
 impl SimpleEmbedder {
     pub fn new(dims: usize) -> Self {
-        Self { dims }
+        Self { dims: dims.max(1) }
     }
 
     pub fn new_384() -> Self {
@@ -30,15 +44,22 @@ impl SimpleEmbedder {
 impl EmbeddingProvider for SimpleEmbedder {
     async fn embed_text(&self, text: &str) -> Result<Embedding> {
         let mut vec = vec![0.0f32; self.dims];
-        let lower = text.to_lowercase();
+        let lower: Vec<char> = text.to_lowercase().chars().collect();
 
-        // Slide character trigrams and hash each into a bucket
-        for trigram in lower.as_bytes().windows(3) {
-            let mut hasher = DefaultHasher::new();
-            trigram.hash(&mut hasher);
-            let hash = hasher.finish();
-            let idx = (hash as usize) % self.dims;
-            vec[idx] += 1.0;
+        if lower.len() >= NGRAM {
+            for ngram in lower.windows(NGRAM) {
+                let mut buf = [0u8; 12];
+                let mut len = 0;
+                for c in ngram {
+                    let mut tmp = [0u8; 4];
+                    for &byte in c.encode_utf8(&mut tmp).as_bytes() {
+                        buf[len] = byte;
+                        len += 1;
+                    }
+                }
+                let hash = fnv1a(&buf[..len]);
+                vec[(hash as usize) % self.dims] += 1.0;
+            }
         }
 
         // L2-normalize so all embeddings have comparable magnitudes

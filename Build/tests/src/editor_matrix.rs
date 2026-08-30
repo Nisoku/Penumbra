@@ -11,15 +11,18 @@ use penumbra_editor::{
 fn doc_parse_paragraph() {
     let doc = Document::new("# Hello\n\nWorld");
     assert_eq!(doc.blocks().len(), 2);
-    assert!(matches!(doc.blocks()[0].kind, BlockKind::Heading(1)));
-    assert!(matches!(doc.blocks()[1].kind, BlockKind::Paragraph));
+    assert!(matches!(
+        doc.blocks()[0].kind,
+        BlockKind::Heading { level: 1, .. }
+    ));
+    assert!(matches!(doc.blocks()[1].kind, BlockKind::Paragraph(_)));
 }
 
 #[test]
 fn doc_parse_code_block() {
     let doc = Document::new("```\nfoo\n```");
     assert_eq!(doc.blocks().len(), 1);
-    assert!(matches!(&doc.blocks()[0].kind, BlockKind::CodeBlock(_)));
+    assert!(matches!(&doc.blocks()[0].kind, BlockKind::CodeBlock { .. }));
 }
 
 #[test]
@@ -28,7 +31,7 @@ fn doc_parse_list() {
     assert_eq!(doc.blocks().len(), 1);
     assert!(matches!(
         &doc.blocks()[0].kind,
-        BlockKind::List { ordered: true }
+        BlockKind::List { ordered: true, .. }
     ));
 }
 
@@ -44,7 +47,10 @@ fn doc_block_lookup() {
     let doc = Document::new("# Hello\n\nWorld");
     let first_id = doc.blocks()[0].id;
     assert!(doc.block(first_id).is_some());
-    assert_eq!(doc.block(first_id).unwrap().kind, BlockKind::Heading(1));
+    assert!(matches!(
+        doc.block(first_id).unwrap().kind,
+        BlockKind::Heading { level: 1, .. }
+    ));
 }
 
 #[test]
@@ -199,8 +205,11 @@ fn view_model_from_doc() {
     let doc = Document::new("# Hello\n\nWorld");
     let vm = ViewModel::from_doc(&doc, None, Cursor::new(0));
     assert_eq!(vm.blocks().len(), 2);
-    assert!(matches!(&vm.blocks()[0].kind, BlockKind::Heading(1)));
-    assert!(matches!(&vm.blocks()[1].kind, BlockKind::Paragraph));
+    assert!(matches!(
+        &vm.blocks()[0].kind,
+        BlockKind::Heading { level: 1, .. }
+    ));
+    assert!(matches!(&vm.blocks()[1].kind, BlockKind::Paragraph(_)));
 }
 
 #[test]
@@ -233,7 +242,7 @@ fn edit_cycle() {
     assert_eq!(modified, "Hello Beautiful World");
     let doc = Document::new(&modified);
     assert_eq!(doc.blocks().len(), 1);
-    assert!(matches!(&doc.blocks()[0].kind, BlockKind::Paragraph));
+    assert!(matches!(&doc.blocks()[0].kind, BlockKind::Paragraph(_)));
     assert_eq!(doc.source, modified);
 }
 
@@ -269,8 +278,11 @@ fn session_heading_split_drops_tail_into_paragraph() {
     let mut session = EditorSession::new("## Alpha beta");
     session.split_active_at("## Alpha ".len());
     assert_eq!(session.blocks().len(), 2);
-    assert!(matches!(session.blocks()[0].kind, BlockKind::Heading(2)));
-    assert!(matches!(session.blocks()[1].kind, BlockKind::Paragraph));
+    assert!(matches!(
+        session.blocks()[0].kind,
+        BlockKind::Heading { level: 2, .. }
+    ));
+    assert!(matches!(session.blocks()[1].kind, BlockKind::Paragraph(_)));
     assert_eq!(session.blocks()[1].text, "beta");
 }
 
@@ -292,7 +304,7 @@ fn session_enter_at_block_start_opens_paragraph_above() {
     let mut session = EditorSession::new("hello");
     session.split_active_at(0);
     assert_eq!(session.blocks().len(), 2);
-    assert_eq!(session.blocks()[0].kind, BlockKind::Paragraph);
+    assert!(matches!(session.blocks()[0].kind, BlockKind::Paragraph(_)));
     assert!(session.blocks()[0].text.is_empty());
     assert_eq!(session.active(), 0);
 }

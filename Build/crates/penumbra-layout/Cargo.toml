@@ -8,3 +8,4 @@ license.workspace = true
 penumbra-core = { path = "../penumbra-core" }
 vibe-graph-layout-gpu = "0.1.1"
 tracing = { workspace = true }
+web-time = { workspace = true }

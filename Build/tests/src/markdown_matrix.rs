@@ -7,6 +7,7 @@ use penumbra_markdown::parser::markdown_to_html;
 use penumbra_markdown::parser::markdown_to_plain;
 use penumbra_markdown::parser::parse_document;
 use penumbra_markdown::render::html::render_html;
+use penumbra_markdown::render::markdown::render_markdown;
 use penumbra_markdown::render::text::render_plain;
 
 use chrono::{TimeZone, Utc};
@@ -797,4 +798,46 @@ fn rewrite_updates_bare_and_aliased_links_case_insensitively() {
     // copies stay untouched.
     assert_eq!(rewritten.matches("[[old title]]").count(), 3);
     assert_eq!(rewritten.matches("[[Old Title|").count(), 0);
+}
+
+const ROUNDTRIP_CORPUS: &[&str] = &[
+    "# Heading",
+    "## Heading 2\n\nBody text",
+    "Paragraph with **bold**, *em*, ~~struck~~, `code`, and\nsoft break.\n\nAnd a line  \nhard break",
+    "```rust\nfn main() {}\n```",
+    "- one\n- two\n- three",
+    "- [x] done\n- [ ] todo",
+    "1. first\n2. second",
+    "> quoted\n> \n> more",
+    "before\n\n---\n\nafter",
+    "| H1 | H2 |\n| --- | --- |\n| C1 | C2 |",
+    "| a\\|b | **c** |\n| :--- | ---: |\n| x | y |",
+    "<div>\nraw html\n</div>",
+    "A note[^1] with a reference.\n\n[^1]: The note text",
+    "See [[other note]] and #tagged",
+    "![alt text](https://example.com/img.png \"title\")",
+    "A [link](https://example.com \"Title\") in prose",
+];
+
+#[test]
+fn serializer_roundtrip_matches_source() {
+    for (i, source) in ROUNDTRIP_CORPUS.iter().enumerate() {
+        let doc = parse_document(source).expect("corpus item parses");
+        let rendered = render_markdown(&doc);
+        assert_eq!(
+            rendered, *source,
+            "roundtrip mismatch at corpus index {}",
+            i
+        );
+    }
+}
+
+#[test]
+fn serializer_roundtrip_is_stable() {
+    for source in ROUNDTRIP_CORPUS {
+        let doc = parse_document(source).expect("corpus item parses");
+        let once = render_markdown(&doc);
+        let twice = render_markdown(&parse_document(&once).expect("rendered re-parses"));
+        assert_eq!(once, twice);
+    }
 }

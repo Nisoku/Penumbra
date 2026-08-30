@@ -686,7 +686,7 @@ impl LayoutEngine {
     }
 
     fn random_position() -> VibePos {
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use web_time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

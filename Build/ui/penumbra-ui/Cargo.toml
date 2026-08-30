@@ -15,7 +15,8 @@ path = "src/main.rs"
 slint.workspace = true
 rfd = "0.17.2"
 opfs = "0.2"
-async-channel = "2"
+futures.workspace = true
+web-time.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
 penumbra-app = { path = "../../crates/penumbra-app" }
@@ -35,13 +36,11 @@ candle = ["penumbra-embed/candle"]
 candle-load = ["penumbra-embed/candle-load"]
 candle-wasm = ["candle-load"]
 
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
-
 [target.'cfg(target_family = "wasm")'.dependencies]
-tokio = { version = "1", features = ["macros", "sync", "time"] }
 wasm-bindgen = { version = "0.2" }
-wasm-bindgen-futures = "0.4"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 [build-dependencies]
 slint-build.workspace = true
