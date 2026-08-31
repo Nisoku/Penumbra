@@ -1,0 +1,92 @@
+import { Theme } from "theme.slint";
+
+export component CanvasSurface inherits Rectangle {
+    in property <string> base-path: "";
+    in property <string> mid-path: "";
+    in property <string> top-path: "";
+    in-out property <length> camera-x: 0px;
+    in-out property <length> camera-y: 0px;
+    in-out property <float> zoom: 1;
+    callback camera-changed(length, length, float);
+    callback pressed();
+
+    property <bool> dragging: false;
+    property <length> drag-start-x: 0px;
+    property <length> drag-start-y: 0px;
+    property <length> cam-start-x: 0px;
+    property <length> cam-start-y: 0px;
+    property <float> base-opacity:
+        root.zoom >= 2.5 ? 0.0 : (root.zoom < 0.4 ? root.zoom / 0.4 : 1.0);
+
+    base := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.base-path;
+        stroke: Theme.hairline;
+        stroke-width: 1px;
+        opacity: root.base-opacity;
+    }
+
+    mid := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.mid-path;
+        stroke: Theme.edge;
+        stroke-width: 1px;
+        stroke-line-cap: round;
+    }
+
+    top := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.top-path;
+        stroke: Theme.edge-selected;
+        stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
+
+    ta := TouchArea {
+        width: 100%;
+        height: 100%;
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                if (event.button != PointerEventButton.left) {
+                    return;
+                }
+                root.dragging = true;
+                root.drag-start-x = ta.pressed-x;
+                root.drag-start-y = ta.pressed-y;
+                root.cam-start-x = root.camera-x;
+                root.cam-start-y = root.camera-y;
+                root.pressed();
+            } else if (event.kind == PointerEventKind.up) {
+                root.dragging = false;
+            }
+        }
+
+        moved => {
+            if (root.dragging) {
+                root.camera-x = root.cam-start-x + (ta.mouse-x - root.drag-start-x);
+                root.camera-y = root.cam-start-y + (ta.mouse-y - root.drag-start-y);
+                root.camera-changed(root.camera-x, root.camera-y, root.zoom);
+            }
+        }
+
+        scroll-event(event) => {
+            let old-zoom = root.zoom;
+            let new-zoom = Math.max(0.1, Math.min(5.0, old-zoom * (event.delta-y > 0px ? 1.1 : 1 / 1.1)));
+            root.camera-x = ta.mouse-x - (ta.mouse-x - root.camera-x) / old-zoom * new-zoom;
+            root.camera-y = ta.mouse-y - (ta.mouse-y - root.camera-y) / old-zoom * new-zoom;
+            root.zoom = new-zoom;
+            root.camera-changed(root.camera-x, root.camera-y, root.zoom);
+            accept
+        }
+    }
+}

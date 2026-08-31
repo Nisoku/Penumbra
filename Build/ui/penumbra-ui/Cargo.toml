@@ -44,3 +44,4 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 [build-dependencies]
 slint-build.workspace = true
+penumbra-component = { path = "../penumbra-component" }

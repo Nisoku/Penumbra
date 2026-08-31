@@ -1,0 +1,39 @@
+import { Theme } from "theme.slint";
+
+export component CodeBlock inherits Rectangle {
+    in property <string> content;
+    in property <string> language;
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-medium;
+    background: Theme.well;
+
+    if root.language != "": Text {
+        x: 12px;
+        y: 8px;
+        text: root.language;
+        font-family: "monospace";
+        font-size: 11px;
+        color: Theme.placeholder;
+    }
+
+    body := Text {
+        x: 12px;
+        y: root.language != "" ? 30px : 12px;
+        width: parent.width - 24px;
+        text: root.content;
+        font-family: "monospace";
+        font-size: 12.5px;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: body.preferred-height + (root.language != "" ? 42px : 24px);
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

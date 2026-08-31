@@ -1,0 +1,6 @@
+[package]
+name = "penumbra-component"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Slint component library and design tokens for Penumbra"

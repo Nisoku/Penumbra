@@ -1,0 +1,30 @@
+import { Theme } from "theme.slint";
+
+export component HeadingBlock inherits Rectangle {
+    in property <string> content;
+    in property <int> level;
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-small;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    body := Text {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        text: root.content;
+        font-size: root.level == 1 ? 24px : (root.level == 2 ? 20px : (root.level == 3 ? 17px : 15px));
+        font-weight: 600;
+        color: Theme.ink;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: body.preferred-height + 16px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

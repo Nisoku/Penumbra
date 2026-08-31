@@ -4743,6 +4743,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "penumbra-component"
+version = "0.1.0"
+
+[[package]]
 name = "penumbra-core"
 version = "0.1.0"
 dependencies = [
@@ -4923,6 +4927,7 @@ dependencies = [
  "opfs",
  "penumbra-app",
  "penumbra-auto-link",
+ "penumbra-component",
  "penumbra-core",
  "penumbra-editor",
  "penumbra-embed",

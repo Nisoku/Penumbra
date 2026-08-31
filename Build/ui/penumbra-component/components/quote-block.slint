@@ -1,0 +1,38 @@
+import { Theme } from "theme.slint";
+
+export component QuoteBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-small;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    Rectangle {
+        x: 8px;
+        y: 4px;
+        width: 3px;
+        height: Math.max(body.height, 18px);
+        border-radius: 2px;
+        background: Theme.accent-soft;
+    }
+
+    body := Text {
+        x: 16px;
+        y: 4px;
+        width: parent.width - 24px;
+        text: root.content;
+        font-size: 15px;
+        font-italic: true;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: body.preferred-height + 8px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

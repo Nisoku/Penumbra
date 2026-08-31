@@ -1,0 +1,27 @@
+import { Theme } from "theme.slint";
+
+export component HtmlBlock inherits Rectangle {
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-small;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    Text {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
+        text: "<html>";
+        font-family: "monospace";
+        font-size: 11px;
+        color: Theme.placeholder;
+    }
+
+    height: 30px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

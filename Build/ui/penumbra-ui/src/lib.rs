@@ -31,12 +31,14 @@ use slint::Model;
 slint::include_modules!();
 
 thread_local! {
-    static UI_CARDS_MODEL: std::cell::RefCell<Option<Rc<slint::VecModel<NoteCardVM>>>> =
-        const { std::cell::RefCell::new(None) };
+    static UI_CARDS_MODEL: std::cell::RefCell<Option<Rc<slint::VecModel<NoteCardVM>>>> = const {
+        std::cell::RefCell::new(None)
+    };
 }
 
 const WELCOME_TITLE: &str = "Welcome to Penumbra";
-const WELCOME_BODY: &str = "This is your first note.\n\nEverything you write lands on the map over time. Drag notes around, link them, and watch constellations form.";
+const WELCOME_BODY: &str =
+    "This is your first note.\n\nEverything you write lands on the map over time. Drag notes around, link them, and watch constellations form.";
 
 const TOP_BAR_HEIGHT: f32 = 52.0;
 
@@ -61,6 +63,7 @@ struct SharedState {
     editor: Mutex<Option<EditorSession>>,
     editor_note: Mutex<Option<NoteId>>,
     editor_title: Mutex<Option<String>>,
+    editor_model: Mutex<Option<Rc<slint::VecModel<BlockVM>>>>,
     editor_dirty: AtomicBool,
     edit_pending: AtomicI32,
     glide: Mutex<Option<CameraGlide>>,
@@ -107,6 +110,7 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         editor: Mutex::new(None),
         editor_note: Mutex::new(None),
         editor_title: Mutex::new(None),
+        editor_model: Mutex::new(None),
         editor_dirty: AtomicBool::new(false),
         edit_pending: AtomicI32::new(0),
         glide: Mutex::new(None),
@@ -473,6 +477,20 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
 }
 
 fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
+    apply_editor_rows(state, ui, None, true);
+}
+
+/// Republish the block model after a keystroke without scrolling, so the panel
+/// previews react live while the caret stays put.
+fn refresh_editor_live(state: &SharedState, ui: &AppWindow, typed: &str) {
+    apply_editor_rows(state, ui, Some(typed), false);
+    live_patch_card(state, ui);
+}
+
+/// Push the editor block rows to the model. With `live` the active row shows
+/// the currently typed text (preview rendered from it) and nothing is scrolled;
+/// otherwise the rows mirror the session and the view auto-scrolls to active.
+fn apply_editor_rows(state: &SharedState, ui: &AppWindow, live: Option<&str>, scroll: bool) {
     let guard = state.editor.lock().unwrap();
     let Some(session) = guard.as_ref() else {
         return;
@@ -482,22 +500,110 @@ fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
     let vm: Vec<BlockVM> = blocks
         .iter()
         .enumerate()
-        .map(|(idx, block)| BlockVM {
-            id: idx as i32,
-            text: display::display_text(block).into(),
-            edit_text: block.text.as_str().into(),
-            is_active: idx == active,
-            kind: display::kind_name(&block.kind).into(),
-            level: display::heading_level(block) as i32,
-            language: display::code_language(block).into(),
+        .map(|(idx, block)| {
+            let typed = if idx == active {
+                live.unwrap_or(block.text.as_str())
+            } else {
+                block.text.as_str()
+            };
+            let live_kind = if idx == active && live.is_some() {
+                display::live_kind_name(&block.kind, typed)
+            } else {
+                display::kind_name(&block.kind)
+            };
+            let live_text = if idx == active && live.is_some() {
+                display::live_display_text(&block.kind, typed)
+            } else {
+                display::display_text(block)
+            };
+            let level = if idx == active && live.is_some() {
+                display::live_heading_level(&block.kind, typed) as i32
+            } else {
+                display::heading_level(block) as i32
+            };
+            BlockVM {
+                id: idx as i32,
+                text: display::display_text(block).into(),
+                edit_text: typed.into(),
+                is_active: idx == active,
+                kind: display::kind_name(&block.kind).into(),
+                level,
+                language: display::code_language(block).into(),
+                live_kind: live_kind.into(),
+                live_text: live_text.into(),
+                live_height: display::estimate_live_height(
+                    &block.kind,
+                    typed,
+                    editor_column_px(ui),
+                ),
+            }
         })
         .collect();
     let target_y =
         display::scroll_target_y(blocks, active, editor_column_px(ui), editor_body_px(ui));
     drop(guard);
-    ui.set_editor_blocks(slint::ModelRc::new(slint::VecModel::from(vm)));
+
+    let mut model_guard = state.editor_model.lock().unwrap();
+    match model_guard.as_ref() {
+        Some(model) if model.row_count() == vm.len() => {
+            for (i, row) in vm.into_iter().enumerate() {
+                model.set_row_data(i, row);
+            }
+        }
+        _ => {
+            let model = Rc::new(slint::VecModel::from(vm));
+            ui.set_editor_blocks(slint::ModelRc::new(Rc::clone(&model)));
+            *model_guard = Some(model);
+        }
+    }
+    drop(model_guard);
+
     ui.set_editor_focus_id(active as i32);
-    scroll_editor_to_active(ui, target_y);
+    if scroll {
+        scroll_editor_to_active(ui, target_y);
+    }
+}
+
+/// Keep the note's card on the map faithful to the in-editor edits. The card
+/// is hidden behind the full-screen panel, so patching it live just makes the
+/// restored view instantly current.
+fn live_patch_card(state: &SharedState, _ui: &AppWindow) {
+    let preview = {
+        let editor_guard = state.editor.lock().unwrap();
+        let Some(session) = editor_guard.as_ref() else {
+            return;
+        };
+        session.raw_body().chars().take(80).collect::<String>()
+    };
+    let title = {
+        let title_guard = state.editor_title.lock().unwrap();
+        let Some(title) = title_guard.as_ref() else {
+            return;
+        };
+        title.clone()
+    };
+    let Some(note_id) = *state.editor_note.lock().unwrap() else {
+        return;
+    };
+    let card_id = note_code(&note_id);
+
+    let mut cards = state.cards.lock().unwrap();
+    let Some(idx) = cards.iter().position(|card| card.id == card_id) else {
+        return;
+    };
+    let mut row = cards[idx].clone();
+    if row.title.as_str() == title.as_str() && row.preview.as_str() == preview.as_str() {
+        return;
+    }
+    row.title = title.into();
+    row.preview = preview.into();
+    cards[idx] = row.clone();
+    drop(cards);
+    UI_CARDS_MODEL.with(|cell| {
+        if let Some(model) = cell.borrow().as_ref() {
+            model.set_row_data(idx, row);
+        }
+    });
 }
 
 /// Width available to block text inside the editor body column, matching the
@@ -738,15 +844,19 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
         let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_text_changed(move |block_id, text| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
             let mut guard = state.editor.lock().unwrap();
             let Some(session) = guard.as_mut() else {
                 return;
             };
-            if session.active() != block_id as usize {
+            if session.active() != (block_id as usize) {
                 return;
             }
             session.apply_active_text(text.as_str());
             drop(guard);
+            refresh_editor_live(&state, &ui, text.as_str());
             schedule_editor_save(&state, handle.clone());
         });
     }
@@ -755,7 +865,11 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
         let state = Rc::clone(state);
         let handle = ui.as_weak();
         ui.on_editor_title_changed(move |text| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
             *state.editor_title.lock().unwrap() = Some(text.into());
+            live_patch_card(&state, &ui);
             schedule_editor_save(&state, handle.clone());
         });
     }
@@ -771,7 +885,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
             let Some(session) = guard.as_mut() else {
                 return;
             };
-            if session.active() != block_id as usize {
+            if session.active() != (block_id as usize) {
                 return;
             }
             session.split_active_at(caret.max(0) as usize);
@@ -792,7 +906,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
             let Some(session) = guard.as_mut() else {
                 return;
             };
-            if session.active() != block_id as usize {
+            if session.active() != (block_id as usize) {
                 return;
             }
             session.merge_into_previous();
@@ -845,7 +959,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
             };
             let mut guard = state.editor.lock().unwrap();
             if let Some(session) = guard.as_mut() {
-                let next = session.active() as i32 + delta;
+                let next = (session.active() as i32) + delta;
                 session.set_active(next.max(0) as usize);
             }
             drop(guard);
@@ -971,7 +1085,9 @@ fn publish_visuals(
     *state.cards.lock().unwrap() = cards;
     *state.links.lock().unwrap() = links;
     ui.set_note_cards(slint::ModelRc::new(Rc::clone(&model)));
-    UI_CARDS_MODEL.with(|cell| *cell.borrow_mut() = Some(Rc::clone(&model)));
+    UI_CARDS_MODEL.with(|cell| {
+        *cell.borrow_mut() = Some(Rc::clone(&model));
+    });
     rebuild_paths(state, ui);
 }
 
@@ -1036,8 +1152,8 @@ fn center_camera_on_cards(state: &SharedState, ui: &AppWindow) {
     let window = ui.window();
     let size = window.size();
     let scale = window.scale_factor();
-    let view_w = size.width as f32 / scale;
-    let view_h = (size.height as f32 / scale - TOP_BAR_HEIGHT).max(0.0);
+    let view_w = (size.width as f32) / scale;
+    let view_h = ((size.height as f32) / scale - TOP_BAR_HEIGHT).max(0.0);
 
     let center_x = (min_x + max_x) * 0.5;
     let center_y = (min_y + max_y) * 0.5;
@@ -1050,8 +1166,8 @@ fn viewport_size(ui: &AppWindow) -> (f32, f32) {
     let size = window.size();
     let scale = window.scale_factor();
     (
-        size.width as f32 / scale,
-        (size.height as f32 / scale - TOP_BAR_HEIGHT).max(0.0),
+        (size.width as f32) / scale,
+        ((size.height as f32) / scale - TOP_BAR_HEIGHT).max(0.0),
     )
 }
 
@@ -1132,8 +1248,8 @@ fn rebuild_paths(state: &SharedState, ui: &AppWindow) {
     let window = ui.window();
     let size = window.size();
     let scale = window.scale_factor();
-    let view_w = size.width as f32 / scale;
-    let view_h = (size.height as f32 / scale - TOP_BAR_HEIGHT).max(0.0);
+    let view_w = (size.width as f32) / scale;
+    let view_h = ((size.height as f32) / scale - TOP_BAR_HEIGHT).max(0.0);
 
     let cards = state.cards.lock().unwrap().clone();
     let links = state.links.lock().unwrap().clone();

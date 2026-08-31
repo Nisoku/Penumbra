@@ -1,8 +1,7 @@
-import { Theme, BlockVM, NoteCardVM } from "theme.slint";
-import { TopBar } from "top-bar.slint";
+import { Theme, PillButton, TopBar } from "@penumbra-component/index.slint";
+import { BlockVM, NoteCardVM } from "data.slint";
 import { MapCanvas } from "map-canvas.slint";
 import { EditorPanel } from "editor-panel.slint";
-import { NewNotePill } from "new-note-pill.slint";
 
 export component AppWindow inherits Window {
     title: "Penumbra";
@@ -47,7 +46,9 @@ export component AppWindow inherits Window {
         x: 0;
         y: 0;
         width: parent.width;
-        ready: root.ready;
+        title: "Penumbra";
+        search-placeholder: "Quick finder";
+        search-enabled: root.ready;
     }
 
     MapCanvas {
@@ -94,11 +95,12 @@ export component AppWindow inherits Window {
         move-active(delta) => { root.editor-move-active(delta); }
     }
 
-    NewNotePill {
+    PillButton {
         x: parent.width - self.width - 24px;
         y: parent.height - self.height - 24px;
         enabled: root.ready && !root.editor-open;
         visible: root.ready && !root.editor-open;
+        text: "New note";
         animate opacity { duration: 150ms; easing: ease-out; }
         clicked => { root.new-note(); }
     }

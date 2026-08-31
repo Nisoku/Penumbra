@@ -32,6 +32,56 @@ pub fn heading_level(block: &BlockEdit) -> u8 {
     }
 }
 
+/// The routing kind the currently typed text would render as, used to preview
+/// a block live while the user edits it.
+pub fn live_kind_name(kind: &BlockKind, text: &str) -> &'static str {
+    match kind {
+        BlockKind::Paragraph(_) | BlockKind::Quote(_) | BlockKind::List { .. } => {
+            let t = text.trim_start();
+            if t.starts_with('#') {
+                "heading"
+            } else if t.starts_with('>') {
+                "quote"
+            } else if t.starts_with("- ")
+                || t.starts_with("+ ")
+                || t.starts_with("* ")
+                || t.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    && t.chars().nth(1) == Some('.')
+            {
+                "list"
+            } else {
+                kind_name(kind)
+            }
+        }
+        _ => kind_name(kind),
+    }
+}
+
+/// The heading level the typed text would render at (count of leading `#`),
+/// bounded to the 6 markdown levels.
+pub fn live_heading_level(kind: &BlockKind, text: &str) -> u8 {
+    if live_kind_name(kind, text) == "heading" {
+        let hashes = text.trim_start().chars().take_while(|&c| c == '#').count();
+        hashes.clamp(1, 6) as u8
+    } else {
+        1
+    }
+}
+
+/// The text rendered in the live preview for the typed `text` of `kind`.
+pub fn live_display_text(kind: &BlockKind, text: &str) -> String {
+    match live_kind_name(kind, text) {
+        "heading" => sanitize_inline(&strip_prefix_markers(text.trim_start(), '#')),
+        "quote" => sanitize_inline(&strip_prefix_lines(text, '>')),
+        "code" => code_parts(text).0,
+        "footnote" => strip_first_prefix(text, '['),
+        "table" => render_table(text),
+        "html" => String::new(),
+        "break" => String::new(),
+        _ => text.to_owned(),
+    }
+}
+
 /// The text shown in an inactive block's preview.
 pub fn display_text(block: &BlockEdit) -> String {
     match &block.kind {
@@ -332,6 +382,49 @@ pub fn estimate_block_height(block: &BlockEdit, column_px: f32) -> f32 {
             BODY_FONT_PX * 1.45 * lines as f32 + 8.0
         }
     }
+}
+
+/// Approximate total height of the active block's live preview
+pub fn estimate_live_height(kind: &BlockKind, text: &str, column_px: f32) -> f32 {
+    let input = match kind {
+        BlockKind::CodeBlock { .. } => 168.0,
+        BlockKind::Heading { .. } => 48.0,
+        _ => 96.0,
+    };
+    if text.is_empty() {
+        return input + 32.0;
+    }
+    let live_kind = live_kind_name(kind, text);
+    let live_text = live_display_text(kind, text);
+    let preview = match live_kind {
+        "heading" => {
+            let size = match live_heading_level(kind, text) {
+                1 => 29.0,
+                2 => 26.0,
+                _ => 23.0,
+            };
+            let lines = wrapped_lines(&live_text, size, AVG_CHAR_PX, column_px);
+            size * lines as f32 + 12.0
+        }
+        "code" | "table" => {
+            let lines = wrapped_lines(&live_text, MONO_FONT_PX, MONO_CHAR_PX, column_px);
+            MONO_FONT_PX * 1.35 * lines as f32 + 12.0
+        }
+        "quote" => {
+            let lines = wrapped_lines(&live_text, BODY_FONT_PX, AVG_CHAR_PX, column_px);
+            BODY_FONT_PX * 1.45 * lines as f32 + 12.0
+        }
+        "footnote" => {
+            let lines = wrapped_lines(&live_text, 13.0, AVG_CHAR_PX, column_px);
+            13.0 * 1.4 * lines as f32 + 12.0
+        }
+        "break" | "html" => 26.0,
+        _ => {
+            let lines = wrapped_lines(&live_text, BODY_FONT_PX, AVG_CHAR_PX, column_px);
+            BODY_FONT_PX * 1.45 * lines as f32 + 12.0
+        }
+    };
+    input + 32.0 + preview
 }
 
 /// The scroll offset that brings the active block to the vertical center of

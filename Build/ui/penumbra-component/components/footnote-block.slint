@@ -1,0 +1,29 @@
+import { Theme } from "theme.slint";
+
+export component FootnoteBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-small;
+    background: block-touch.has-hover ? Theme.wash : transparent;
+
+    body := StyledText {
+        x: 8px;
+        y: 4px;
+        width: parent.width - 16px;
+        text: @markdown("\{root.content}");
+        default-color: Theme.ink-secondary;
+        default-font-size: 13px;
+        vertical-alignment: top;
+        link-color: Theme.accent;
+    }
+
+    height: body.preferred-height + 8px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

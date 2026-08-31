@@ -1,218 +1,5 @@
-import { Theme, BlockVM } from "theme.slint";
-
-component ProseBlock inherits Rectangle {
-    in property <string> content;
-    callback open();
-
-    width: 100%;
-    border-radius: 6px;
-    background: block-touch.has-hover ? Theme.wash : transparent;
-
-    body := StyledText {
-        x: 8px;
-        y: 4px;
-        width: parent.width - 16px;
-        text: @markdown("\{root.content}");
-        default-color: Theme.ink;
-        default-font-size: 15px;
-        vertical-alignment: top;
-        link-color: Theme.accent;
-    }
-
-    height: body.preferred-height + 8px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component HeadingBlock inherits Rectangle {
-    in property <string> content;
-    in property <int> level;
-    callback open();
-
-    width: 100%;
-    border-radius: 6px;
-    background: block-touch.has-hover ? Theme.wash : transparent;
-
-    body := Text {
-        x: 8px;
-        y: 8px;
-        width: parent.width - 16px;
-        text: root.content;
-        font-size: root.level == 1 ? 24px : (root.level == 2 ? 20px : (root.level == 3 ? 17px : 15px));
-        font-weight: 600;
-        color: Theme.ink;
-        wrap: TextWrap.word-wrap;
-    }
-
-    height: body.preferred-height + 16px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component QuoteBlock inherits Rectangle {
-    in property <string> content;
-    callback open();
-
-    width: 100%;
-    border-radius: 6px;
-    background: block-touch.has-hover ? Theme.wash : transparent;
-
-    Rectangle {
-        x: 8px;
-        y: 4px;
-        width: 3px;
-        height: Math.max(body.height, 18px);
-        border-radius: 2px;
-        background: Theme.accent-soft;
-    }
-
-    body := Text {
-        x: 16px;
-        y: 4px;
-        width: parent.width - 24px;
-        text: root.content;
-        font-size: 15px;
-        font-italic: true;
-        color: Theme.ink-secondary;
-        wrap: TextWrap.word-wrap;
-    }
-
-    height: body.preferred-height + 8px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component CodeBlock inherits Rectangle {
-    in property <string> content;
-    in property <string> language;
-    callback open();
-
-    width: 100%;
-    border-radius: 8px;
-    background: Theme.well;
-
-    if root.language != "": Text {
-        x: 12px;
-        y: 8px;
-        text: root.language;
-        font-family: "monospace";
-        font-size: 11px;
-        color: Theme.placeholder;
-    }
-
-    body := Text {
-        x: 12px;
-        y: root.language != "" ? 30px : 12px;
-        width: parent.width - 24px;
-        text: root.content;
-        font-family: "monospace";
-        font-size: 12.5px;
-        color: Theme.ink-secondary;
-        wrap: TextWrap.word-wrap;
-    }
-
-    height: body.preferred-height + (root.language != "" ? 42px : 24px);
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component TableBlock inherits Rectangle {
-    in property <string> content;
-    callback open();
-
-    width: 100%;
-    border-radius: 8px;
-    background: Theme.well;
-
-    body := Text {
-        x: 12px;
-        y: 12px;
-        width: parent.width - 24px;
-        text: root.content;
-        font-family: "monospace";
-        font-size: 12.5px;
-        color: Theme.ink-secondary;
-        wrap: TextWrap.word-wrap;
-    }
-
-    height: body.preferred-height + 24px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component FootnoteBlock inherits Rectangle {
-    in property <string> content;
-    callback open();
-
-    width: 100%;
-    border-radius: 6px;
-    background: block-touch.has-hover ? Theme.wash : transparent;
-
-    body := StyledText {
-        x: 8px;
-        y: 4px;
-        width: parent.width - 16px;
-        text: @markdown("\{root.content}");
-        default-color: Theme.ink-secondary;
-        default-font-size: 13px;
-        vertical-alignment: top;
-        link-color: Theme.accent;
-    }
-
-    height: body.preferred-height + 8px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
-
-component HtmlBlock inherits Rectangle {
-    callback open();
-
-    width: 100%;
-    border-radius: 6px;
-    background: block-touch.has-hover ? Theme.wash : transparent;
-
-    Text {
-        x: 8px;
-        y: 8px;
-        width: parent.width - 16px;
-        text: "<html>";
-        font-family: "monospace";
-        font-size: 11px;
-        color: Theme.placeholder;
-    }
-
-    height: 30px;
-
-    block-touch := TouchArea {
-        width: 100%;
-        height: parent.height;
-        clicked => { root.open(); }
-    }
-}
+import { Theme, ProseBlock, HeadingBlock, QuoteBlock, CodeBlock, TableBlock, FootnoteBlock, HtmlBlock } from "@penumbra-component/index.slint";
+import { BlockVM } from "data.slint";
 
 component ActiveBlock inherits Rectangle {
     in property <BlockVM> block;
@@ -230,7 +17,8 @@ component ActiveBlock inherits Rectangle {
     background: Theme.card-glass;
     border-width: 1px;
     border-color: Theme.accent-soft;
-    height: root.block.kind == "code" ? 168px : (root.block.kind == "heading" ? 48px : 64px);
+
+    property <length> input-height: root.block.kind == "code" ? 168px : (root.block.kind == "heading" ? 48px : 96px);
 
     Rectangle {
         x: 0px;
@@ -245,11 +33,11 @@ component ActiveBlock inherits Rectangle {
         x: 16px;
         y: 8px;
         width: parent.width - 32px;
-        height: parent.height - 16px;
+        height: root.input-height;
         text: root.block.edit-text;
         color: Theme.ink;
         selection-background-color: Theme.accent;
-        selection-foreground-color: #FFFFFF;
+        selection-foreground-color: Theme.on-accent;
         font-family: root.block.kind == "code" ? "monospace" : "";
         font-size: root.block.kind == "code" ? 12.5px : 15px;
         single-line: root.block.kind == "heading";
@@ -288,6 +76,85 @@ component ActiveBlock inherits Rectangle {
             }
         }
     }
+
+    live-well := Rectangle {
+        x: 16px;
+        y: editor-field.y + editor-field.height + 8px;
+        width: parent.width - 32px;
+        height: Math.max(root.block.live-height - root.input-height - 32px, 0px);
+        clip: false;
+
+        if root.block.live-kind == "heading":
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                text: root.block.live-text;
+                font-size: root.block.level == 1 ? 24px : (root.block.level == 2 ? 20px : (root.block.level == 3 ? 17px : 15px));
+                font-weight: 600;
+                color: Theme.ink;
+                wrap: TextWrap.word-wrap;
+            }
+
+        if root.block.live-kind == "quote":
+            Rectangle {
+                x: 0px;
+                y: 0px;
+                width: 3px;
+                height: Math.max(quote-live.preferred-height, 18px);
+                border-radius: 2px;
+                background: Theme.accent-soft;
+            }
+
+            quote-live := Text {
+                x: 12px;
+                y: 0px;
+                width: parent.width - 12px;
+                text: root.block.live-text;
+                font-size: 15px;
+                font-italic: true;
+                color: Theme.ink-secondary;
+                wrap: TextWrap.word-wrap;
+            }
+
+        if root.block.live-kind == "code":
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                text: root.block.live-text;
+                font-family: "monospace";
+                font-size: 12.5px;
+                color: Theme.ink-secondary;
+                wrap: TextWrap.word-wrap;
+            }
+
+        if root.block.live-kind == "table":
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                text: root.block.live-text;
+                font-family: "monospace";
+                font-size: 12.5px;
+                color: Theme.ink-secondary;
+                wrap: TextWrap.word-wrap;
+            }
+
+        if root.block.live-kind == "paragraph" || root.block.live-kind == "list" || root.block.live-kind == "footnote":
+            StyledText {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                text: @markdown("\{root.block.live-text}");
+                default-color: Theme.ink;
+                default-font-size: 15px;
+                vertical-alignment: top;
+                link-color: Theme.accent;
+            }
+    }
+
+    height: root.block.live-height;
 }
 
 export component EditorPanel inherits Rectangle {

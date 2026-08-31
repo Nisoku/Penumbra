@@ -1,0 +1,29 @@
+import { Theme } from "theme.slint";
+
+export component TableBlock inherits Rectangle {
+    in property <string> content;
+    callback open();
+
+    width: 100%;
+    border-radius: Theme.radius-medium;
+    background: Theme.well;
+
+    body := Text {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        text: root.content;
+        font-family: "monospace";
+        font-size: 12.5px;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: body.preferred-height + 24px;
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

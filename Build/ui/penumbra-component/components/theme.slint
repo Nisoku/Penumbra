@@ -1,12 +1,15 @@
 export global Theme {
     out property<color> ground: #F7F5F0;
     out property<color> ground-sunken: #EFECE5;
+    out property<color> ground-raised: #F7F5F0E6;
     out property<color> ink: #1F1D1A;
     out property<color> ink-secondary: #6B675E;
     out property<color> ink-tertiary: #98938A;
     out property<color> hairline: #1F1D1A24;
     out property<color> accent: #3D56B0;
     out property<color> accent-soft: #3D56B01F;
+    out property<color> on-accent: #FFFFFF;
+    out property<color> accent-hover: #FFFFFF1F;
     out property<color> card-glass: #FFFFFFB8;
     out property<color> card-highlight: #FFFFFF14;
     out property<color> card-shadow: #1F1D1A1A;
@@ -16,31 +19,8 @@ export global Theme {
     out property<color> wash: #3D56B014;
     out property<color> well: #EFECE5;
     out property<color> scrim: #1F1D1A59;
-}
 
-export struct BlockVM {
-    id: int,
-    text: string,
-    edit-text: string,
-    is-active: bool,
-    kind: string,
-    level: int,
-    language: string,
-}
-
-export struct NoteCardVM {
-    id: int,
-    title: string,
-    preview: string,
-    tags: string,
-    pinned: bool,
-    x: length,
-    y: length,
-}
-
-export struct EdgeVM {
-    x1: length,
-    y1: length,
-    x2: length,
-    y2: length,
+    out property<length> radius-small: 6px;
+    out property<length> radius-medium: 8px;
+    out property<length> radius-pill: 23px;
 }

@@ -1,0 +1,5 @@
+{
+    "slint.libraryPaths": {
+        "penumbra-component": "Build/ui/penumbra-component/components"
+    }
+}
