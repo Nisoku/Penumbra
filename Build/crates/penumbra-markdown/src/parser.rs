@@ -4,15 +4,26 @@ use crate::ast::{Block, BlockId, BlockKind, Document, Inline, ListItem, Table, T
 use penumbra_core::error::Result;
 
 pub fn parse_document(text: &str) -> Result<Document> {
-    let blocks = run_parser(text)?;
+    let (blocks, _) = run_offsets(text)?;
     Ok(Document { blocks })
 }
 
 pub fn parse_block(text: &str) -> Result<Vec<Block>> {
-    run_parser(text)
+    Ok(run_offsets(text)?.0)
 }
 
-fn run_parser(text: &str) -> Result<Vec<Block>> {
+/// Parse into top-level blocks paired with their byte range in the source
+/// A half-open byte range of a block in the parsed source text.
+pub type SourceRange = (usize, usize);
+
+/// Parse into top-level blocks paired with their byte range in the source
+pub fn parse_blocks_offsets(text: &str) -> Result<Vec<(Block, SourceRange)>> {
+    let (blocks, ranges) = run_offsets(text)?;
+    debug_assert_eq!(blocks.len(), ranges.len());
+    Ok(blocks.into_iter().zip(ranges).collect())
+}
+
+fn run_offsets(text: &str) -> Result<(Vec<Block>, Vec<SourceRange>)> {
     let options = pulldown_cmark::Options::ENABLE_TABLES
         | pulldown_cmark::Options::ENABLE_FOOTNOTES
         | pulldown_cmark::Options::ENABLE_STRIKETHROUGH
@@ -21,8 +32,9 @@ fn run_parser(text: &str) -> Result<Vec<Block>> {
 
     let parser = pulldown_cmark::Parser::new_ext(text, options);
     let mut ctx = Ctx::new();
-    for event in parser {
-        ctx.handle(event)?;
+    for (event, range) in parser.into_offset_iter() {
+        ctx.handle(event, &range)?;
+        ctx.last_end = ctx.last_end.max(range.end);
     }
     ctx.finish()
 }
@@ -30,6 +42,14 @@ fn run_parser(text: &str) -> Result<Vec<Block>> {
 struct Ctx {
     blocks: Vec<Block>,
     stack: Vec<Frame>,
+    /// Byte offset of each frame's opening construct, aligned with `stack`.
+    frame_starts: Vec<usize>,
+    /// Top-level block source ranges, aligned with `blocks`.
+    ranges: Vec<(usize, usize)>,
+    /// Opening offset of the innermost table, for its range.
+    table_start: usize,
+    /// The largest construct end seen so far, a fallback for flushed blocks.
+    last_end: usize,
     inlines: Vec<Inline>,
     text_buf: String,
     table_phase: TablePhase,
@@ -52,6 +72,10 @@ impl Ctx {
         Self {
             blocks: Vec::new(),
             stack: Vec::new(),
+            frame_starts: Vec::new(),
+            ranges: Vec::new(),
+            table_start: 0,
+            last_end: 0,
             inlines: Vec::new(),
             text_buf: String::new(),
             table_phase: TablePhase::None,
@@ -62,16 +86,16 @@ impl Ctx {
         }
     }
 
-    fn handle(&mut self, event: Event<'_>) -> Result<()> {
+    fn handle(&mut self, event: Event<'_>, range: &std::ops::Range<usize>) -> Result<()> {
         use Event::*;
         match event {
             Start(tag) => {
                 self.flush_text();
-                self.handle_start(tag);
+                self.handle_start(tag, range.start);
             }
             End(tag) => {
                 self.flush_text();
-                self.handle_end(tag)?;
+                self.handle_end(tag, range.end)?;
             }
             Text(text) => {
                 let in_code_block = self
@@ -108,10 +132,14 @@ impl Ctx {
             Rule => {
                 self.flush_text();
                 self.flush();
-                self.blocks.push(Block {
-                    id: BlockId::new(),
-                    kind: BlockKind::ThematicBreak,
-                });
+                self.push_block(
+                    Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::ThematicBreak,
+                    },
+                    range.start,
+                    range.end,
+                );
             }
             TaskListMarker(checked) => {
                 self.flush_text();
@@ -142,11 +170,12 @@ impl Ctx {
         }
     }
 
-    fn handle_start(&mut self, tag: Tag<'_>) {
+    fn handle_start(&mut self, tag: Tag<'_>, start: usize) {
         match tag {
             Tag::Paragraph => {
                 self.flush();
                 self.stack.push(Frame::Paragraph);
+                self.frame_starts.push(start);
             }
             Tag::Heading { level, .. } => {
                 self.flush();
@@ -159,10 +188,12 @@ impl Ctx {
                     HeadingLevel::H6 => 6,
                 };
                 self.stack.push(Frame::Heading { level: lvl });
+                self.frame_starts.push(start);
             }
             Tag::BlockQuote(_) => {
                 self.flush();
                 self.stack.push(Frame::Quote(Vec::new()));
+                self.frame_starts.push(start);
             }
             Tag::CodeBlock(kind) => {
                 self.flush();
@@ -181,22 +212,26 @@ impl Ctx {
                     language: lang,
                     text: String::new(),
                 });
+                self.frame_starts.push(start);
             }
-            Tag::List(start) => {
+            Tag::List(start_no) => {
                 self.flush();
                 self.stack.push(Frame::List {
-                    start,
+                    start: start_no,
                     items: Vec::new(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Item => {
                 self.stack.push(Frame::ListItem {
                     checked_mark: None,
                     children: Vec::new(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Table(alignments) => {
                 self.flush();
+                self.table_start = start;
                 self.table_phase = TablePhase::Headers;
                 self.table_headers.clear();
                 self.table_body.clear();
@@ -222,21 +257,25 @@ impl Ctx {
                     name: name.to_string(),
                     children: Vec::new(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Emphasis => {
                 self.stack.push(Frame::Emphasis {
                     saved_len: self.inlines.len(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Strong => {
                 self.stack.push(Frame::Strong {
                     saved_len: self.inlines.len(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Strikethrough => {
                 self.stack.push(Frame::Strikethrough {
                     saved_len: self.inlines.len(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Link {
                 dest_url, title, ..
@@ -246,6 +285,7 @@ impl Ctx {
                     title: title.to_string(),
                     saved_len: self.inlines.len(),
                 });
+                self.frame_starts.push(start);
             }
             Tag::Image {
                 dest_url, title, ..
@@ -254,56 +294,82 @@ impl Ctx {
                     url: dest_url.to_string(),
                     title: title.to_string(),
                 });
+                self.frame_starts.push(start);
             }
             _ => {}
         }
     }
 
-    fn handle_end(&mut self, tag: TagEnd) -> Result<()> {
+    fn handle_end(&mut self, tag: TagEnd, end: usize) -> Result<()> {
         match tag {
             TagEnd::Paragraph => {
                 self.pop_frame();
+                let start = self.pop_start();
                 let children = std::mem::take(&mut self.inlines);
-                self.push_block(Block {
-                    id: BlockId::new(),
-                    kind: BlockKind::Paragraph(children),
-                });
+                self.push_block(
+                    Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Paragraph(children),
+                    },
+                    start,
+                    end,
+                );
             }
             TagEnd::Heading(_) => {
                 if let Some(Frame::Heading { level }) = self.pop_frame() {
+                    let start = self.pop_start();
                     let children = std::mem::take(&mut self.inlines);
-                    self.push_block(Block {
-                        id: BlockId::new(),
-                        kind: BlockKind::Heading { level, children },
-                    });
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::Heading { level, children },
+                        },
+                        start,
+                        end,
+                    );
                 }
             }
             TagEnd::BlockQuote(_) => {
                 if let Some(Frame::Quote(children)) = self.pop_frame() {
-                    self.push_block(Block {
-                        id: BlockId::new(),
-                        kind: BlockKind::Quote(children),
-                    });
+                    let start = self.pop_start();
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::Quote(children),
+                        },
+                        start,
+                        end,
+                    );
                 }
             }
             TagEnd::CodeBlock => {
                 if let Some(Frame::CodeBlock { language, text }) = self.pop_frame() {
-                    self.push_block(Block {
-                        id: BlockId::new(),
-                        kind: BlockKind::CodeBlock { language, text },
-                    });
+                    let start = self.pop_start();
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::CodeBlock { language, text },
+                        },
+                        start,
+                        end,
+                    );
                 }
             }
             TagEnd::List(ordered) => {
                 if let Some(Frame::List { items, start, .. }) = self.pop_frame() {
-                    self.push_block(Block {
-                        id: BlockId::new(),
-                        kind: BlockKind::List {
-                            ordered,
-                            start,
-                            items,
+                    let block_start = self.pop_start();
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::List {
+                                ordered,
+                                start,
+                                items,
+                            },
                         },
-                    });
+                        block_start,
+                        end,
+                    );
                 }
             }
             TagEnd::Item => {
@@ -326,6 +392,7 @@ impl Ctx {
                     children,
                 }) = self.pop_frame()
                 {
+                    let _ = self.pop_start();
                     if let Some(Frame::List { ref mut items, .. }) = self.stack.last_mut() {
                         items.push(ListItem {
                             checked: checked_mark,
@@ -347,14 +414,18 @@ impl Ctx {
                 let headers = std::mem::take(&mut self.table_headers);
                 let rows = std::mem::take(&mut self.table_body);
                 self.table_phase = TablePhase::None;
-                self.push_block(Block {
-                    id: BlockId::new(),
-                    kind: BlockKind::Table(Table {
-                        headers,
-                        rows,
-                        align,
-                    }),
-                });
+                self.push_block(
+                    Block {
+                        id: BlockId::new(),
+                        kind: BlockKind::Table(Table {
+                            headers,
+                            rows,
+                            align,
+                        }),
+                    },
+                    self.table_start,
+                    end,
+                );
             }
             TagEnd::TableHead => {
                 let row = std::mem::take(&mut self.table_row_buf);
@@ -379,26 +450,34 @@ impl Ctx {
             }
             TagEnd::FootnoteDefinition => {
                 if let Some(Frame::FootnoteDefinition { name, children }) = self.pop_frame() {
-                    self.push_block(Block {
-                        id: BlockId::new(),
-                        kind: BlockKind::FootnoteDefinition { name, children },
-                    });
+                    let start = self.pop_start();
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::FootnoteDefinition { name, children },
+                        },
+                        start,
+                        end,
+                    );
                 }
             }
             TagEnd::Emphasis => {
                 if let Some(Frame::Emphasis { saved_len }) = self.pop_frame() {
+                    let _ = self.pop_start();
                     let children: Vec<Inline> = self.inlines.drain(saved_len..).collect();
                     self.inlines.push(Inline::Emphasis(children));
                 }
             }
             TagEnd::Strong => {
                 if let Some(Frame::Strong { saved_len }) = self.pop_frame() {
+                    let _ = self.pop_start();
                     let children: Vec<Inline> = self.inlines.drain(saved_len..).collect();
                     self.inlines.push(Inline::Strong(children));
                 }
             }
             TagEnd::Strikethrough => {
                 if let Some(Frame::Strikethrough { saved_len }) = self.pop_frame() {
+                    let _ = self.pop_start();
                     let children: Vec<Inline> = self.inlines.drain(saved_len..).collect();
                     self.inlines.push(Inline::Strikethrough(children));
                 }
@@ -410,6 +489,7 @@ impl Ctx {
                     saved_len,
                 }) = self.pop_frame()
                 {
+                    let _ = self.pop_start();
                     let children: Vec<Inline> = self.inlines.drain(saved_len..).collect();
                     self.inlines.push(Inline::Link {
                         url,
@@ -420,6 +500,7 @@ impl Ctx {
             }
             TagEnd::Image => {
                 if let Some(Frame::Image { url, title }) = self.pop_frame() {
+                    let _ = self.pop_start();
                     let alt_inlines = std::mem::take(&mut self.inlines);
                     let mut alt_text = String::new();
                     for child in &alt_inlines {
@@ -442,13 +523,19 @@ impl Ctx {
             return;
         }
         let children = std::mem::take(&mut self.inlines);
-        self.push_block(Block {
-            id: BlockId::new(),
-            kind: BlockKind::Paragraph(children),
-        });
+        self.push_block(
+            Block {
+                id: BlockId::new(),
+                kind: BlockKind::Paragraph(children),
+            },
+            self.last_end,
+            self.last_end,
+        );
     }
 
-    fn push_block(&mut self, block: Block) {
+    /// Push a block, recording its source range only when it lands at the
+    /// top level (nested blocks belong to their container's range instead).
+    fn push_block(&mut self, block: Block, start: usize, end: usize) {
         for frame in self.stack.iter_mut().rev() {
             match frame {
                 Frame::Quote(ref mut children) => {
@@ -470,6 +557,7 @@ impl Ctx {
                 _ => {}
             }
         }
+        self.ranges.push((start, end));
         self.blocks.push(block);
     }
 
@@ -477,10 +565,15 @@ impl Ctx {
         self.stack.pop()
     }
 
-    fn finish(mut self) -> Result<Vec<Block>> {
+    /// The opening offset paired with the frame `pop_frame` just removed.
+    fn pop_start(&mut self) -> usize {
+        self.frame_starts.pop().unwrap_or(0)
+    }
+
+    fn finish(mut self) -> Result<(Vec<Block>, Vec<SourceRange>)> {
         self.flush_text();
         self.flush();
-        Ok(self.blocks)
+        Ok((self.blocks, self.ranges))
     }
 }
 

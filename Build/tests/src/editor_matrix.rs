@@ -58,7 +58,7 @@ fn doc_source_range() {
     let doc = Document::new("# Hello\n\nWorld");
     let first_id = doc.blocks()[0].id;
     let second_id = doc.blocks()[1].id;
-    assert_eq!(doc.source_range(first_id), Some((0, 9)));
+    assert_eq!(doc.source_range(first_id), Some((0, 8)));
     assert_eq!(doc.source_range(second_id), Some((9, 14)));
 }
 
@@ -396,13 +396,11 @@ fn session_raw_body_serializes_lists_and_prose() {
 }
 
 #[test]
-fn session_thematic_break_is_omitted_from_editing_blocks() {
+fn session_thematic_break_is_preserved_as_editable_block() {
     let session = EditorSession::new("alpha\n\n---\n\nbeta");
-    assert_eq!(session.blocks().len(), 2);
-    assert!(session
-        .blocks()
-        .iter()
-        .all(|b| !matches!(b.kind, BlockKind::ThematicBreak)));
+    assert_eq!(session.blocks().len(), 3);
+    assert!(matches!(session.blocks()[1].kind, BlockKind::ThematicBreak));
+    assert_eq!(session.blocks()[1].text, "---");
 }
 
 #[test]

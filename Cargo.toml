@@ -34,6 +34,6 @@ async-trait = "0.1"
 web-time = "1"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
-slint = "1.17"
-slint-build = "1.17"
+slint = "1.18"
+slint-build = "1.18"
 edita-core = "0.2.1"
