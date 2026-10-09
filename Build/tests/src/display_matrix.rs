@@ -79,78 +79,19 @@ fn non_block_input_is_passthrough() {
 }
 
 #[test]
-fn scroll_target_tracks_active_block() {
-    let mut raw = String::from("# Heading\n\n");
-    for _ in 0..30 {
-        raw.push_str("This is a fairly long line of body text that wraps across the column.\n");
-    }
-    let blocks = blocks_of(&raw);
-    let early = display::scroll_target_y(&blocks, 0, 600.0, 400.0);
-    let late = display::scroll_target_y(&blocks, blocks.len() - 1, 600.0, 400.0);
-    assert!(late > early);
-    let mid = display::scroll_target_y(&blocks, blocks.len() / 2, 600.0, 400.0);
-    assert!(mid > 0.0);
-}
-
-#[test]
-fn scroll_target_zero_for_first_block() {
-    let blocks = blocks_of("# Only one block");
-    assert_eq!(display::scroll_target_y(&blocks, 0, 600.0, 400.0), 0.0);
-}
-
-#[test]
-fn live_kind_tracks_prefix_while_typing() {
-    let blocks = blocks_of("plain start");
+fn html_block_shows_trimmed_source() {
+    let blocks = blocks_of("<div class=\"row\">\n<p>hi</p>\n</div>\n");
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(display::kind_name(&blocks[0].kind), "html");
     assert_eq!(
-        display::live_kind_name(&blocks[0].kind, "# New title"),
-        "heading"
-    );
-    assert_eq!(
-        display::live_kind_name(&blocks[0].kind, "> quoted line"),
-        "quote"
-    );
-    assert_eq!(display::live_kind_name(&blocks[0].kind, "- one"), "list");
-    assert_eq!(display::live_kind_name(&blocks[0].kind, "1. two"), "list");
-    assert_eq!(
-        display::live_kind_name(&blocks[0].kind, "just prose"),
-        "paragraph"
+        display::display_text(&blocks[0]),
+        "<div class=\"row\">\n<p>hi</p>\n</div>"
     );
 }
 
 #[test]
-fn live_display_strips_markers_for_typed_heading_and_quote() {
-    let blocks = blocks_of("plain start");
-    assert_eq!(
-        display::live_display_text(&blocks[0].kind, "# Live **bold**"),
-        "Live bold"
-    );
-    assert_eq!(
-        display::live_display_text(&blocks[0].kind, "> one\n> two"),
-        "one\ntwo"
-    );
-    assert_eq!(
-        display::live_display_text(&blocks[0].kind, "- a\n- b"),
-        "- a\n- b"
-    );
-}
-
-#[test]
-fn live_heading_level_counts_hashes() {
-    let blocks = blocks_of("plain start");
-    assert_eq!(display::live_heading_level(&blocks[0].kind, "### Three"), 3);
-}
-
-#[test]
-fn live_height_grows_with_preview_and_clamps_space_for_code() {
-    let blocks = blocks_of("```rust\nfn main() {}\n```");
-    let empty = display::estimate_live_height(&blocks[0].kind, "", 600.0);
-    let filled = display::estimate_live_height(&blocks[0].kind, "```rust\nlet a = 1;\n```", 600.0);
-    assert!(filled > empty);
-    assert!(empty >= 168.0 + 32.0);
-}
-
-#[test]
-fn live_preview_collapses_for_breaker_kinds() {
-    let blocks = blocks_of("plain");
-    assert_eq!(display::live_display_text(&blocks[0].kind, ""), "");
+fn break_kind_routes_to_break_tile() {
+    let blocks = blocks_of("---\n");
+    assert_eq!(display::kind_name(&blocks[0].kind), "break");
+    assert_eq!(display::heading_level(&blocks[0]), 0);
 }

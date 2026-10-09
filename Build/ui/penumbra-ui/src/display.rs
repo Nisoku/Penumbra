@@ -3,11 +3,6 @@
 use penumbra_editor::doc::BlockKind;
 use penumbra_editor::session::BlockEdit;
 
-const AVG_CHAR_PX: f32 = 7.8;
-const MONO_CHAR_PX: f32 = 7.5;
-const MONO_FONT_PX: f32 = 12.5;
-const BODY_FONT_PX: f32 = 15.0;
-
 /// The machine name of a block kind, used to route blocks to their preview
 /// component in the panel.
 pub fn kind_name(kind: &BlockKind) -> &'static str {
@@ -32,56 +27,6 @@ pub fn heading_level(block: &BlockEdit) -> u8 {
     }
 }
 
-/// The routing kind the currently typed text would render as, used to preview
-/// a block live while the user edits it.
-pub fn live_kind_name(kind: &BlockKind, text: &str) -> &'static str {
-    match kind {
-        BlockKind::Paragraph(_) | BlockKind::Quote(_) | BlockKind::List { .. } => {
-            let t = text.trim_start();
-            if t.starts_with('#') {
-                "heading"
-            } else if t.starts_with('>') {
-                "quote"
-            } else if t.starts_with("- ")
-                || t.starts_with("+ ")
-                || t.starts_with("* ")
-                || t.chars().next().is_some_and(|c| c.is_ascii_digit())
-                    && t.chars().nth(1) == Some('.')
-            {
-                "list"
-            } else {
-                kind_name(kind)
-            }
-        }
-        _ => kind_name(kind),
-    }
-}
-
-/// The heading level the typed text would render at (count of leading `#`),
-/// bounded to the 6 markdown levels.
-pub fn live_heading_level(kind: &BlockKind, text: &str) -> u8 {
-    if live_kind_name(kind, text) == "heading" {
-        let hashes = text.trim_start().chars().take_while(|&c| c == '#').count();
-        hashes.clamp(1, 6) as u8
-    } else {
-        1
-    }
-}
-
-/// The text rendered in the live preview for the typed `text` of `kind`.
-pub fn live_display_text(kind: &BlockKind, text: &str) -> String {
-    match live_kind_name(kind, text) {
-        "heading" => sanitize_inline(&strip_prefix_markers(text.trim_start(), '#')),
-        "quote" => sanitize_inline(&strip_prefix_lines(text, '>')),
-        "code" => code_parts(text).0,
-        "footnote" => strip_first_prefix(text, '['),
-        "table" => render_table(text),
-        "html" => String::new(),
-        "break" => String::new(),
-        _ => text.to_owned(),
-    }
-}
-
 /// The text shown in an inactive block's preview.
 pub fn display_text(block: &BlockEdit) -> String {
     match &block.kind {
@@ -92,7 +37,7 @@ pub fn display_text(block: &BlockEdit) -> String {
         BlockKind::CodeBlock { .. } => code_parts(&block.text).0,
         BlockKind::Table(_) => render_table(&block.text),
         BlockKind::FootnoteDefinition { .. } => strip_first_prefix(&block.text, '['),
-        BlockKind::HtmlBlock(_) => String::new(),
+        BlockKind::HtmlBlock(_) => block.text.trim().to_owned(),
         _ => block.text.clone(),
     }
 }
@@ -332,114 +277,3 @@ fn push_padded_row(out: &mut String, row: &[String], widths: &[usize]) {
 }
 
 const PAD: usize = 1;
-
-/// Approximate line-count of a wrapped preview string for a given column.
-fn wrapped_lines(text: &str, font_px: f32, char_px: f32, column_px: f32) -> usize {
-    let _ = font_px;
-    let per_line = ((column_px - 16.0) / char_px).max(8.0) as usize;
-    text.lines()
-        .map(|line| {
-            let chars = line.chars().count();
-            chars.div_ceil(per_line).max(1)
-        })
-        .sum()
-}
-
-/// Best-effort height of a block's preview, mirroring the panel's paddings so
-/// the auto-scroll lands close to the real layout.
-pub fn estimate_block_height(block: &BlockEdit, column_px: f32) -> f32 {
-    match &block.kind {
-        BlockKind::Heading { level, .. } => {
-            let size = match level {
-                1 => 29.0,
-                2 => 26.0,
-                _ => 23.0,
-            };
-            let lines = wrapped_lines(&display_text(block), size, AVG_CHAR_PX, column_px);
-            size * lines as f32 + 16.0
-        }
-        BlockKind::CodeBlock { .. } => {
-            let (body, lang) = code_parts(&block.text);
-            let lines = wrapped_lines(&body, MONO_FONT_PX, MONO_CHAR_PX, column_px);
-            MONO_FONT_PX * 1.35 * lines as f32 + if lang.is_empty() { 24.0 } else { 42.0 }
-        }
-        BlockKind::Table(_) => {
-            let body = render_table(&block.text);
-            let lines = wrapped_lines(&body, MONO_FONT_PX, MONO_CHAR_PX, column_px);
-            MONO_FONT_PX * 1.35 * lines as f32 + 24.0
-        }
-        BlockKind::Quote(_) => {
-            let lines = wrapped_lines(&display_text(block), BODY_FONT_PX, AVG_CHAR_PX, column_px);
-            BODY_FONT_PX * 1.45 * lines as f32 + 8.0
-        }
-        BlockKind::HtmlBlock(_) => 30.0,
-        BlockKind::FootnoteDefinition { .. } => {
-            let lines = wrapped_lines(&display_text(block), 13.0, AVG_CHAR_PX, column_px);
-            13.0 * 1.4 * lines as f32 + 8.0
-        }
-        _ => {
-            let lines = wrapped_lines(&display_text(block), BODY_FONT_PX, AVG_CHAR_PX, column_px);
-            BODY_FONT_PX * 1.45 * lines as f32 + 8.0
-        }
-    }
-}
-
-/// Approximate total height of the active block's live preview
-pub fn estimate_live_height(kind: &BlockKind, text: &str, column_px: f32) -> f32 {
-    let input = match kind {
-        BlockKind::CodeBlock { .. } => 168.0,
-        BlockKind::Heading { .. } => 48.0,
-        _ => 96.0,
-    };
-    if text.is_empty() {
-        return input + 32.0;
-    }
-    let live_kind = live_kind_name(kind, text);
-    let live_text = live_display_text(kind, text);
-    let preview = match live_kind {
-        "heading" => {
-            let size = match live_heading_level(kind, text) {
-                1 => 29.0,
-                2 => 26.0,
-                _ => 23.0,
-            };
-            let lines = wrapped_lines(&live_text, size, AVG_CHAR_PX, column_px);
-            size * lines as f32 + 12.0
-        }
-        "code" | "table" => {
-            let lines = wrapped_lines(&live_text, MONO_FONT_PX, MONO_CHAR_PX, column_px);
-            MONO_FONT_PX * 1.35 * lines as f32 + 12.0
-        }
-        "quote" => {
-            let lines = wrapped_lines(&live_text, BODY_FONT_PX, AVG_CHAR_PX, column_px);
-            BODY_FONT_PX * 1.45 * lines as f32 + 12.0
-        }
-        "footnote" => {
-            let lines = wrapped_lines(&live_text, 13.0, AVG_CHAR_PX, column_px);
-            13.0 * 1.4 * lines as f32 + 12.0
-        }
-        "break" | "html" => 26.0,
-        _ => {
-            let lines = wrapped_lines(&live_text, BODY_FONT_PX, AVG_CHAR_PX, column_px);
-            BODY_FONT_PX * 1.45 * lines as f32 + 12.0
-        }
-    };
-    input + 32.0 + preview
-}
-
-/// The scroll offset that brings the active block to the vertical center of
-/// the panel body, clamped to the top.
-pub fn scroll_target_y(blocks: &[BlockEdit], active: usize, column_px: f32, body_px: f32) -> f32 {
-    const PADDING_TOP: f32 = 28.0;
-    const SPACING: f32 = 4.0;
-
-    let mut y = PADDING_TOP;
-    for block in blocks.iter().take(active) {
-        y += estimate_block_height(block, column_px) + SPACING;
-    }
-    let active_height = blocks
-        .get(active)
-        .map(|b| estimate_block_height(b, column_px))
-        .unwrap_or(0.0);
-    (y - (body_px - active_height) / 2.0).max(0.0)
-}

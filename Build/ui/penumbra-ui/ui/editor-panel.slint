@@ -1,4 +1,4 @@
-import { Theme, ProseBlock, HeadingBlock, QuoteBlock, CodeBlock, TableBlock, FootnoteBlock, HtmlBlock } from "@penumbra-component/index.slint";
+import { Theme, ProseBlock, HeadingBlock, QuoteBlock, CodeBlock, TableBlock, FootnoteBlock, HtmlBlock, BreakBlock } from "@penumbra-component/index.slint";
 import { BlockVM } from "data.slint";
 
 component ActiveBlock inherits Rectangle {
@@ -11,14 +11,13 @@ component ActiveBlock inherits Rectangle {
     callback undo();
     callback redo();
     callback move-active(int);
+    callback close();
 
     width: 100%;
     border-radius: 8px;
     background: Theme.card-glass;
     border-width: 1px;
     border-color: Theme.accent-soft;
-
-    property <length> input-height: root.block.kind == "code" ? 168px : (root.block.kind == "heading" ? 48px : 96px);
 
     Rectangle {
         x: 0px;
@@ -33,7 +32,7 @@ component ActiveBlock inherits Rectangle {
         x: 16px;
         y: 8px;
         width: parent.width - 32px;
-        height: root.input-height;
+        height: self.preferred-height;
         text: root.block.edit-text;
         color: Theme.ink;
         selection-background-color: Theme.accent;
@@ -56,9 +55,8 @@ component ActiveBlock inherits Rectangle {
                     } else {
                         root.undo();
                     }
-                    accept;
                 }
-                reject;
+                accept;
             } else if (event.text == Key.Return && !(root.block.kind == "code") && !event.modifiers.shift) {
                 root.split(root.block.id, self.cursor-position-byte-offset);
                 accept;
@@ -71,90 +69,113 @@ component ActiveBlock inherits Rectangle {
             } else if (event.text == Key.DownArrow && root.block.kind == "heading") {
                 root.move-active(1);
                 accept;
+            } else if (event.text == Key.Escape) {
+                root.close();
+                accept;
             } else {
                 reject;
             }
         }
     }
 
-    live-well := Rectangle {
-        x: 16px;
-        y: editor-field.y + editor-field.height + 8px;
-        width: parent.width - 32px;
-        height: Math.max(root.block.live-height - root.input-height - 32px, 0px);
-        clip: false;
+    height: editor-field.height + 16px;
+}
 
-        if root.block.live-kind == "heading":
-            Text {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                text: root.block.live-text;
-                font-size: root.block.level == 1 ? 24px : (root.block.level == 2 ? 20px : (root.block.level == 3 ? 17px : 15px));
-                font-weight: 600;
-                color: Theme.ink;
-                wrap: TextWrap.word-wrap;
-            }
+component BlockRow inherits VerticalLayout {
+    in property <BlockVM> block;
+    in property <int> focus-id;
 
-        if root.block.live-kind == "quote":
-            Rectangle {
-                x: 0px;
-                y: 0px;
-                width: 3px;
-                height: Math.max(quote-live.preferred-height, 18px);
-                border-radius: 2px;
-                background: Theme.accent-soft;
-            }
+    callback open-block(int);
+    callback text-changed(int, string);
+    callback split(int, int);
+    callback merge-up(int);
+    callback undo();
+    callback redo();
+    callback move-active(int);
+    callback close();
+    callback anchor(length, length);
 
-            quote-live := Text {
-                x: 12px;
-                y: 0px;
-                width: parent.width - 12px;
-                text: root.block.live-text;
-                font-size: 15px;
-                font-italic: true;
-                color: Theme.ink-secondary;
-                wrap: TextWrap.word-wrap;
-            }
+    spacing: 0px;
+    width: 100%;
+    height: self.preferred-height;
 
-        if root.block.live-kind == "code":
-            Text {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                text: root.block.live-text;
-                font-family: "monospace";
-                font-size: 12.5px;
-                color: Theme.ink-secondary;
-                wrap: TextWrap.word-wrap;
-            }
+    animate height { duration: 130ms; easing: ease-out; }
 
-        if root.block.live-kind == "table":
-            Text {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                text: root.block.live-text;
-                font-family: "monospace";
-                font-size: 12.5px;
-                color: Theme.ink-secondary;
-                wrap: TextWrap.word-wrap;
-            }
-
-        if root.block.live-kind == "paragraph" || root.block.live-kind == "list" || root.block.live-kind == "footnote":
-            StyledText {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                text: @markdown("\{root.block.live-text}");
-                default-color: Theme.ink;
-                default-font-size: 15px;
-                vertical-alignment: top;
-                link-color: Theme.accent;
-            }
+    if root.block.is-active: ActiveBlock {
+        block: root.block;
+        focus-id: root.focus-id;
+        width: parent.width;
+        text-changed(id, text) => { root.text-changed(id, text); }
+        split(id, caret) => { root.split(id, caret); }
+        merge-up(id) => { root.merge-up(id); }
+        undo => { root.undo(); }
+        redo => { root.redo(); }
+        move-active(delta) => { root.move-active(delta); }
+        close => { root.close(); }
     }
 
-    height: root.block.live-height;
+    if !root.block.is-active: VerticalLayout {
+        spacing: 0px;
+        width: parent.width;
+
+        if root.block.kind == "paragraph" || root.block.kind == "list": ProseBlock {
+            content: root.block.text;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "heading": HeadingBlock {
+            content: root.block.text;
+            level: root.block.level;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "quote": QuoteBlock {
+            content: root.block.text;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "code": CodeBlock {
+            content: root.block.text;
+            language: root.block.language;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "table": TableBlock {
+            content: root.block.text;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "footnote": FootnoteBlock {
+            content: root.block.text;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "html": HtmlBlock {
+            content: root.block.text;
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+
+        if root.block.kind == "break": BreakBlock {
+            width: parent.width;
+            open() => { root.open-block(root.block.id); }
+        }
+    }
+
+    anchor-timer := Timer {
+        interval: 150ms;
+        running: root.block.is-active;
+        triggered => {
+            anchor-timer.running = false;
+            root.anchor(root.y, root.height);
+        }
+    }
 }
 
 export component EditorPanel inherits Rectangle {
@@ -176,6 +197,16 @@ export component EditorPanel inherits Rectangle {
     callback undo();
     callback redo();
     callback move-active(int);
+
+    function scroll_to(y: length, height: length) -> length {
+        if body.height <= 0px { return 0px; }
+        let target = y - (body.height - height) * 0.5;
+        let max_y = column.preferred-height - body.height;
+        if max_y <= 0px { return 0px; }
+        if target >= max_y { return max_y; }
+        if target >= 0px { return target; }
+        return 0px;
+    }
 
     dim := Rectangle {
         x: 0px;
@@ -221,6 +252,14 @@ export component EditorPanel inherits Rectangle {
                     init => { self.focus(); }
                     edited => { root.title-changed(self.text); }
 
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.close();
+                            accept;
+                        }
+                        reject;
+                    }
+
                     if self.text == "" && !self.has-focus: Text {
                         height: 100%;
                         width: 100%;
@@ -253,13 +292,15 @@ export component EditorPanel inherits Rectangle {
             y: 96px;
             width: parent.width;
             height: parent.height - 96px - 36px;
-            viewport-y <=> root.editor-scroll-y;
+            content-y <=> root.editor-scroll-y;
+            content-width: self.width;
+            content-height: Math.max(column.preferred-height, self.height);
 
             HorizontalLayout {
                 width: parent.width;
                 alignment: center;
 
-                VerticalLayout {
+                column := VerticalLayout {
                     width: Math.min(parent.width - 96px, 720px);
                     padding-top: 28px;
                     padding-bottom: 48px;
@@ -267,64 +308,19 @@ export component EditorPanel inherits Rectangle {
                     padding-right: 32px;
                     spacing: 4px;
 
-                    for block in root.blocks: VerticalLayout {
-                        spacing: 0px;
+                    for block in root.blocks: BlockRow {
+                        block: block;
+                        focus-id: root.focus-id;
                         width: parent.width;
-
-                        if block.is-active: ActiveBlock {
-                            block: block;
-                            focus-id: root.focus-id;
-                            width: parent.width;
-                            text-changed(id, text) => { root.text-changed(id, text); }
-                            split(id, caret) => { root.split(id, caret); }
-                            merge-up(id) => { root.merge-up(id); }
-                            undo => { root.undo(); }
-                            redo => { root.redo(); }
-                            move-active(delta) => { root.move-active(delta); }
-                        }
-
-                        if !block.is-active && (block.kind == "paragraph" || block.kind == "list"): ProseBlock {
-                            content: block.text;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "heading": HeadingBlock {
-                            content: block.text;
-                            level: block.level;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "quote": QuoteBlock {
-                            content: block.text;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "code": CodeBlock {
-                            content: block.text;
-                            language: block.language;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "table": TableBlock {
-                            content: block.text;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "footnote": FootnoteBlock {
-                            content: block.text;
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
-
-                        if !block.is-active && block.kind == "html": HtmlBlock {
-                            width: parent.width;
-                            open() => { root.open-block(block.id); }
-                        }
+                        open-block(id) => { root.open-block(id); }
+                        text-changed(id, text) => { root.text-changed(id, text); }
+                        split(id, caret) => { root.split(id, caret); }
+                        merge-up(id) => { root.merge-up(id); }
+                        undo => { root.undo(); }
+                        redo => { root.redo(); }
+                        move-active(delta) => { root.move-active(delta); }
+                        close => { root.close(); }
+                        anchor(top, height) => { root.editor-scroll-y = scroll_to(top, height); }
                     }
                 }
             }

@@ -477,80 +477,59 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
 }
 
 fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
-    apply_editor_rows(state, ui, None, true);
+    apply_editor_rows(state, ui);
 }
 
-/// Republish the block model after a keystroke without scrolling, so the panel
-/// previews react live while the caret stays put.
-fn refresh_editor_live(state: &SharedState, ui: &AppWindow, typed: &str) {
-    apply_editor_rows(state, ui, Some(typed), false);
+/// Republish the block model after a keystroke
+fn refresh_editor_live(state: &SharedState, ui: &AppWindow) {
+    apply_editor_rows(state, ui);
     live_patch_card(state, ui);
 }
 
-/// Push the editor block rows to the model. With `live` the active row shows
-/// the currently typed text (preview rendered from it) and nothing is scrolled;
-/// otherwise the rows mirror the session and the view auto-scrolls to active.
-fn apply_editor_rows(state: &SharedState, ui: &AppWindow, live: Option<&str>, scroll: bool) {
+/// Build the block rows a session maps to plus its active row
+pub fn editor_block_rows(session: &EditorSession) -> (Vec<BlockVM>, usize) {
+    let blocks = session.blocks();
+    let active = session.active();
+    let rows = blocks
+        .iter()
+        .enumerate()
+        .map(|(idx, block)| BlockVM {
+            id: idx as i32,
+            text: display::display_text(block).into(),
+            edit_text: block.text.clone().into(),
+            is_active: idx == active,
+            kind: display::kind_name(&block.kind).into(),
+            level: display::heading_level(block) as i32,
+            language: display::code_language(block).into(),
+        })
+        .collect();
+    (rows, active)
+}
+
+/// Push the editor block rows to the model
+fn apply_editor_rows(state: &SharedState, ui: &AppWindow) {
     let guard = state.editor.lock().unwrap();
     let Some(session) = guard.as_ref() else {
         return;
     };
-    let blocks = session.blocks();
-    let active = session.active();
-    let vm: Vec<BlockVM> = blocks
-        .iter()
-        .enumerate()
-        .map(|(idx, block)| {
-            let typed = if idx == active {
-                live.unwrap_or(block.text.as_str())
-            } else {
-                block.text.as_str()
-            };
-            let live_kind = if idx == active && live.is_some() {
-                display::live_kind_name(&block.kind, typed)
-            } else {
-                display::kind_name(&block.kind)
-            };
-            let live_text = if idx == active && live.is_some() {
-                display::live_display_text(&block.kind, typed)
-            } else {
-                display::display_text(block)
-            };
-            let level = if idx == active && live.is_some() {
-                display::live_heading_level(&block.kind, typed) as i32
-            } else {
-                display::heading_level(block) as i32
-            };
-            BlockVM {
-                id: idx as i32,
-                text: display::display_text(block).into(),
-                edit_text: typed.into(),
-                is_active: idx == active,
-                kind: display::kind_name(&block.kind).into(),
-                level,
-                language: display::code_language(block).into(),
-                live_kind: live_kind.into(),
-                live_text: live_text.into(),
-                live_height: display::estimate_live_height(
-                    &block.kind,
-                    typed,
-                    editor_column_px(ui),
-                ),
-            }
-        })
-        .collect();
-    let target_y =
-        display::scroll_target_y(blocks, active, editor_column_px(ui), editor_body_px(ui));
+    let (vm, active) = editor_block_rows(session);
     drop(guard);
 
     let mut model_guard = state.editor_model.lock().unwrap();
-    match model_guard.as_ref() {
-        Some(model) if model.row_count() == vm.len() => {
+    match model_guard.as_ref().cloned() {
+        Some(model) => {
+            while model.row_count() > vm.len() {
+                let _ = model.remove_row(model.row_count() - 1);
+            }
             for (i, row) in vm.into_iter().enumerate() {
-                model.set_row_data(i, row);
+                if i < model.row_count() {
+                    model.set_row_data(i, row);
+                } else {
+                    model.push(row);
+                }
             }
         }
-        _ => {
+        None => {
             let model = Rc::new(slint::VecModel::from(vm));
             ui.set_editor_blocks(slint::ModelRc::new(Rc::clone(&model)));
             *model_guard = Some(model);
@@ -559,9 +538,6 @@ fn apply_editor_rows(state: &SharedState, ui: &AppWindow, live: Option<&str>, sc
     drop(model_guard);
 
     ui.set_editor_focus_id(active as i32);
-    if scroll {
-        scroll_editor_to_active(ui, target_y);
-    }
 }
 
 /// Keep the note's card on the map faithful to the in-editor edits. The card
@@ -602,31 +578,6 @@ fn live_patch_card(state: &SharedState, _ui: &AppWindow) {
     UI_CARDS_MODEL.with(|cell| {
         if let Some(model) = cell.borrow().as_ref() {
             model.set_row_data(idx, row);
-        }
-    });
-}
-
-/// Width available to block text inside the editor body column, matching the
-/// centered measure and its horizontal padding.
-fn editor_column_px(ui: &AppWindow) -> f32 {
-    let (win_w, _) = viewport_size(ui);
-    let measure = (win_w - 96.0).min(720.0);
-    (measure - 64.0).max(120.0)
-}
-
-/// Height of the scrollable editor body, matching the full-screen chrome.
-fn editor_body_px(ui: &AppWindow) -> f32 {
-    let (_, win_h) = viewport_size(ui);
-    (win_h + TOP_BAR_HEIGHT - 96.0 - 36.0).max(64.0)
-}
-
-/// Hold the scroll offset one frame so closing the timer's layout settles,
-/// then jump the active block to the center of the panel body.
-fn scroll_editor_to_active(ui: &AppWindow, target_y: f32) {
-    let uiw = ui.as_weak();
-    slint::Timer::single_shot(Duration::from_millis(16), move || {
-        if let Some(ui) = uiw.upgrade() {
-            ui.set_editor_scroll_y(target_y);
         }
     });
 }
@@ -856,7 +807,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
             }
             session.apply_active_text(text.as_str());
             drop(guard);
-            refresh_editor_live(&state, &ui, text.as_str());
+            refresh_editor_live(&state, &ui);
             schedule_editor_save(&state, handle.clone());
         });
     }

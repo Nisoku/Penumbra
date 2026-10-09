@@ -1,0 +1,23 @@
+import { Theme } from "theme.slint";
+
+export component BreakBlock inherits Rectangle {
+    callback open();
+
+    width: 100%;
+    height: 24px;
+
+    Rectangle {
+        x: 8px;
+        y: (parent.height - 1px) * 0.5;
+        width: parent.width - 16px;
+        height: 1px;
+        border-radius: 1px;
+        background: block-touch.has-hover ? Theme.ink-secondary : Theme.hairline;
+    }
+
+    block-touch := TouchArea {
+        width: 100%;
+        height: parent.height;
+        clicked => { root.open(); }
+    }
+}

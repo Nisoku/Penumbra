@@ -406,6 +406,31 @@ fn parser_html_rt() {
 }
 
 #[test]
+fn block_html_becomes_html_block() {
+    let doc = parse_document("<div>\n<p>hi</p>\n</div>").unwrap();
+    assert_eq!(doc.blocks.len(), 1);
+    match &doc.blocks[0].kind {
+        BlockKind::HtmlBlock(src) => assert_eq!(src, "<div>\n<p>hi</p>\n</div>"),
+        other => panic!("expected HtmlBlock, got {:?}", other),
+    }
+}
+
+#[test]
+fn inline_html_stays_inline_in_paragraph() {
+    let doc = parse_document("hello <b>world</b>").unwrap();
+    assert_eq!(doc.blocks.len(), 1);
+    match &doc.blocks[0].kind {
+        BlockKind::Paragraph(children) => {
+            assert_eq!(children.len(), 4);
+            assert_eq!(children[0], Text("hello ".to_string()));
+            assert_eq!(children[1], Text("<b>".to_string()));
+            assert_eq!(children[3], Text("</b>".to_string()));
+        }
+        other => panic!("expected Paragraph, got {:?}", other),
+    }
+}
+
+#[test]
 fn parser_plain_rt() {
     let plain = markdown_to_plain("# Title\n\nBody text").unwrap();
     assert!(plain.contains("Title"));

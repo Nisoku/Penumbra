@@ -1,23 +1,34 @@
 import { Theme } from "theme.slint";
 
 export component HtmlBlock inherits Rectangle {
+    in property <string> content;
     callback open();
 
     width: 100%;
-    border-radius: Theme.radius-small;
-    background: block-touch.has-hover ? Theme.wash : transparent;
+    border-radius: Theme.radius-medium;
+    background: block-touch.has-hover ? Theme.wash : Theme.well;
 
     Text {
-        x: 8px;
+        x: 12px;
         y: 8px;
-        width: parent.width - 16px;
-        text: "<html>";
+        text: "html";
         font-family: "monospace";
         font-size: 11px;
         color: Theme.placeholder;
     }
 
-    height: 30px;
+    body := Text {
+        x: 12px;
+        y: 30px;
+        width: parent.width - 24px;
+        text: root.content;
+        font-family: "monospace";
+        font-size: 12.5px;
+        color: Theme.ink-secondary;
+        wrap: TextWrap.word-wrap;
+    }
+
+    height: root.content == "" ? 30px : body.preferred-height + 42px;
 
     block-touch := TouchArea {
         width: 100%;

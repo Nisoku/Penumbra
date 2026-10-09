@@ -7,6 +7,8 @@ mod core_matrix;
 #[cfg(test)]
 mod display_matrix;
 #[cfg(test)]
+mod editor_glue_matrix;
+#[cfg(test)]
 mod editor_matrix;
 #[cfg(test)]
 mod embed_matrix;

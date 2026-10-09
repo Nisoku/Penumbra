@@ -117,7 +117,13 @@ impl Ctx {
                 self.flush_text();
                 self.inlines.push(Inline::Code(text.to_string()));
             }
-            Html(text) | InlineHtml(text) => {
+            Html(text) => {
+                // Raw html inside a CommonMark html block
+                if let Some(Frame::HtmlBlock { text: html }) = self.stack.last_mut() {
+                    html.push_str(&text);
+                }
+            }
+            InlineHtml(text) => {
                 self.flush_text();
                 self.inlines.push(Inline::Text(text.to_string()));
             }
@@ -210,6 +216,13 @@ impl Ctx {
                 };
                 self.stack.push(Frame::CodeBlock {
                     language: lang,
+                    text: String::new(),
+                });
+                self.frame_starts.push(start);
+            }
+            Tag::HtmlBlock => {
+                self.flush();
+                self.stack.push(Frame::HtmlBlock {
                     text: String::new(),
                 });
                 self.frame_starts.push(start);
@@ -349,6 +362,19 @@ impl Ctx {
                         Block {
                             id: BlockId::new(),
                             kind: BlockKind::CodeBlock { language, text },
+                        },
+                        start,
+                        end,
+                    );
+                }
+            }
+            TagEnd::HtmlBlock => {
+                if let Some(Frame::HtmlBlock { text }) = self.pop_frame() {
+                    let start = self.pop_start();
+                    self.push_block(
+                        Block {
+                            id: BlockId::new(),
+                            kind: BlockKind::HtmlBlock(text),
                         },
                         start,
                         end,
@@ -584,6 +610,9 @@ enum Frame {
     },
     CodeBlock {
         language: Option<String>,
+        text: String,
+    },
+    HtmlBlock {
         text: String,
     },
     List {
