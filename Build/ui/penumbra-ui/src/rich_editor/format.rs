@@ -1,72 +1,11 @@
-use cosmic_text::{AttrsList, AttrsOwned, Buffer, Color, Cursor, Style, Weight};
+use cosmic_text::Color;
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-/// Which inline attribute a toggle request flips.
+/// Which inline mark a toggle request wraps the selection with.
 #[derive(Clone, Copy)]
 pub(super) enum Format {
     Bold,
     Italic,
-}
-
-/// Flip `format` across the `[start, end)` selection, splitting existing attr
-/// spans on the selection boundaries so only the selected sub-range changes.
-pub(super) fn apply_span_format(buffer: &mut Buffer, start: Cursor, end: Cursor, format: Format) {
-    for line_index in start.line..=end.line {
-        let line = &mut buffer.lines[line_index];
-        let text_len = line.text().len();
-        let selected_start = if line_index == start.line {
-            start.index
-        } else {
-            0
-        };
-        let selected_end = if line_index == end.line {
-            end.index
-        } else {
-            text_len
-        };
-        if selected_start >= selected_end {
-            continue;
-        }
-
-        let old_attrs = line.attrs_list().clone();
-        let mut boundaries = vec![0, text_len, selected_start, selected_end];
-        for (range, _) in old_attrs.spans_iter() {
-            boundaries.push(range.start);
-            boundaries.push(range.end);
-        }
-        boundaries.sort_unstable();
-        boundaries.dedup();
-
-        let mut new_attrs = AttrsList::new(&old_attrs.defaults());
-        for pair in boundaries.windows(2) {
-            let (from, to) = (pair[0], pair[1]);
-            if from >= to || to > text_len {
-                continue;
-            }
-            let mut attrs = AttrsOwned::new(&old_attrs.get_span(from));
-            if from >= selected_start && to <= selected_end {
-                match format {
-                    Format::Bold => {
-                        attrs.weight = if attrs.weight == Weight::BOLD {
-                            Weight::NORMAL
-                        } else {
-                            Weight::BOLD
-                        };
-                    }
-                    Format::Italic => {
-                        attrs.style = if attrs.style == Style::Italic {
-                            Style::Normal
-                        } else {
-                            Style::Italic
-                        };
-                    }
-                }
-            }
-            new_attrs.add_span(from..to, &attrs.as_attrs());
-        }
-        line.set_attrs_list(new_attrs);
-    }
-    buffer.set_redraw(true);
 }
 
 /// Alpha-blend a solid `color` rectangle into the pixel buffer, clipped to the

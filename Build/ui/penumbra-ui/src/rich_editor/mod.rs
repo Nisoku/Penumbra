@@ -2,13 +2,9 @@
 
 mod engine;
 mod format;
-mod runs;
-mod runs_table;
+mod scan;
 
 use engine::EditorState;
-use penumbra_markdown::ast::{Block, BlockId, BlockKind, Document, Inline};
-use penumbra_markdown::parser::parse_document;
-use penumbra_markdown::render::markdown::render_markdown;
 use slint::Image;
 use std::{cell::RefCell, rc::Rc};
 
@@ -27,14 +23,12 @@ const CONTENT_PADDING_BOTTOM: i32 = 22;
 /// [`RichEditor::pointer_double_click`], and [`RichEditor::pointer_scroll`].
 pub struct RichEditor {
     state: Rc<RefCell<EditorState>>,
-    document: RichDocument,
 }
 
 impl RichEditor {
     pub fn new(markdown: &str) -> Self {
-        let document = RichDocument::from_markdown(markdown);
-        let state = Rc::new(RefCell::new(EditorState::new(document.blocks())));
-        Self { state, document }
+        let state = Rc::new(RefCell::new(EditorState::new(markdown)));
+        Self { state }
     }
 
     /// Render the current editor contents to an RGBA image for Slint to display.
@@ -48,14 +42,15 @@ impl RichEditor {
         self.state.borrow_mut().render().as_bytes().to_vec()
     }
 
-    /// Return the editor's current plain-text contents (line-separated).
+    /// Return the editor's current contents.
     pub fn text(&self) -> String {
-        self.state.borrow().plain_text()
+        self.state.borrow().source_text()
     }
 
-    /// Serialize the current document back to markdown
+    /// Return the current document as markdown. Byte-identical to [`text`], since
+    /// the buffer *is* the markdown source.
     pub fn to_markdown(&self) -> String {
-        self.document.to_markdown()
+        self.state.borrow().source_text()
     }
 
     /// Return a short status string describing selection/caret.
@@ -66,7 +61,6 @@ impl RichEditor {
     /// Handle a key event from Slint.
     pub fn input_key(&mut self, text: &str, shift: bool, control: bool, meta: bool, alt: bool) {
         self.state.borrow_mut().key(text, shift, control, meta, alt);
-        self.sync_document_from_editor_text();
     }
 
     /// Handle a pointer down event at `(x, y)`. When `extend` is set (Shift
@@ -99,19 +93,16 @@ impl RichEditor {
     /// Toggle bold formatting on the current selection.
     pub fn toggle_bold(&mut self) {
         self.state.borrow_mut().toggle_format_bold();
-        self.sync_document_from_editor_text();
     }
 
     /// Toggle italic formatting on the current selection.
     pub fn toggle_italic(&mut self) {
         self.state.borrow_mut().toggle_format_italic();
-        self.sync_document_from_editor_text();
     }
 
     /// Cut the current selection to the clipboard.
     pub fn cut_selection(&mut self) {
         self.state.borrow_mut().cut_selection();
-        self.sync_document_from_editor_text();
     }
 
     /// Copy the current selection to the clipboard.
@@ -122,19 +113,16 @@ impl RichEditor {
     /// Paste clipboard text at the caret.
     pub fn paste_clipboard(&mut self) {
         self.state.borrow_mut().paste_clipboard();
-        self.sync_document_from_editor_text();
     }
 
     /// Undo the last edit.
     pub fn undo(&mut self) {
         self.state.borrow_mut().undo();
-        self.sync_document_from_editor_text();
     }
 
     /// Redo the last undone edit.
     pub fn redo(&mut self) {
         self.state.borrow_mut().redo();
-        self.sync_document_from_editor_text();
     }
 
     /// Select the whole document.
@@ -155,49 +143,5 @@ impl RichEditor {
     /// Caret geometry in surface coordinates, or `None` when unresolvable.
     pub fn caret_rect(&self) -> Option<(f32, f32, f32)> {
         self.state.borrow_mut().caret_rect()
-    }
-
-    fn sync_document_from_editor_text(&mut self) {
-        let blocks = self.state.borrow().serialize_blocks();
-        self.document = RichDocument::from_blocks(blocks);
-    }
-}
-
-/// Minimal wrapper over Penumbra's markdown AST.
-struct RichDocument {
-    document: Document,
-}
-
-impl RichDocument {
-    fn from_markdown(markdown: &str) -> Self {
-        let document = parse_document(markdown).unwrap_or_else(|_| Document {
-            blocks: vec![Block {
-                id: BlockId::new(),
-                kind: BlockKind::Paragraph(vec![Inline::Text(markdown.to_owned())]),
-            }],
-        });
-        Self { document }
-    }
-
-    fn blocks(&self) -> &[Block] {
-        &self.document.blocks
-    }
-
-    fn to_markdown(&self) -> String {
-        render_markdown(&self.document)
-    }
-
-    fn from_blocks(blocks: Vec<Block>) -> Self {
-        let blocks = if blocks.is_empty() {
-            vec![Block {
-                id: BlockId::new(),
-                kind: BlockKind::Paragraph(Vec::new()),
-            }]
-        } else {
-            blocks
-        };
-        Self {
-            document: Document { blocks },
-        }
     }
 }

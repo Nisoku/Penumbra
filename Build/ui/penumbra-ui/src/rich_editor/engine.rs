@@ -1,12 +1,10 @@
 use cosmic_text::{
-    Action, Buffer, Color, Cursor, Edit, Editor, FontSystem, Metrics, Motion, Selection, Shaping,
-    SwashCache,
+    Action, Buffer, Color, Cursor, Edit, Editor, FontSystem, Motion, Selection, Shaping, SwashCache,
 };
-use penumbra_markdown::ast::{Block, BlockId, BlockKind, Inline};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
-use super::format::{apply_span_format, blend_rect, Format};
-use super::runs::{append_line_inlines, markdown_runs, BODY_LINE, BODY_SIZE};
+use super::format::{blend_rect, Format};
+use super::scan::{body_metrics, classify_lines, scan_line, LineKind};
 use super::{CONTENT_PADDING_BOTTOM, CONTENT_PADDING_TOP, CONTENT_PADDING_X, HEIGHT, WIDTH};
 
 pub(super) struct EditorState {
@@ -28,26 +26,23 @@ enum UndoGroup {
 }
 
 impl EditorState {
-    /// Build the engine from the parsed document blocks, shaping the rich runs
-    /// into the sized buffer the editor draws from.
-    pub(super) fn new(blocks: &[Block]) -> Self {
+    // Build the engine from raw markdown. The buffer IS the source text; styling
+    // is just a projection on top, so we can't corrupt the user's markdown! XD
+    pub(super) fn new(markdown: &str) -> Self {
         let mut font_system = FontSystem::new();
         let cache = SwashCache::new();
-        let mut buffer = Buffer::new(&mut font_system, Metrics::new(BODY_SIZE, BODY_LINE));
+        let mut buffer = Buffer::new(&mut font_system, body_metrics());
         buffer.set_size(
             Some((WIDTH as i32 - CONTENT_PADDING_X * 2) as f32),
             Some((HEIGHT as i32 - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM) as f32),
         );
-        let rich_runs = markdown_runs(blocks);
-        buffer.set_rich_text(
-            rich_runs
-                .iter()
-                .map(|(text, attrs)| (text.as_str(), attrs.clone())),
+        buffer.set_text(
+            markdown,
             &cosmic_text::Attrs::new(),
             Shaping::Advanced,
             None,
         );
-        Self {
+        let mut state = Self {
             font_system,
             cache,
             editor: Editor::new(buffer),
@@ -56,7 +51,28 @@ impl EditorState {
             open_undo_group: None,
             notice: None,
             focused: false,
-        }
+        };
+        state.restyle();
+        state
+    }
+
+    // Re-derive per-line styling from the current text; never touches the bytes.
+    fn restyle(&mut self) {
+        self.editor.with_buffer_mut(|buffer| {
+            // join with \n so our line indices line up 1:1 with classify_lines'
+            let source: String = buffer
+                .lines
+                .iter()
+                .map(|line| line.text())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let kinds = classify_lines(&source);
+            for (i, line) in buffer.lines.iter_mut().enumerate() {
+                let kind = kinds.get(i).copied().unwrap_or(LineKind::Body);
+                let attrs = scan_line(line.text(), kind);
+                line.set_attrs_list(attrs);
+            }
+        });
     }
 
     pub(super) fn set_focused(&mut self, focused: bool) {
@@ -67,15 +83,14 @@ impl EditorState {
         self.focused
     }
 
-    /// Read the buffer's plain text, newline-joined.
-    pub(super) fn plain_text(&self) -> String {
+    // Reconstruct the raw source byte for byte. Each line keeps its own ending,
+    // so CRLF / trailing whitespace / blank runs all survive the round-trip.
+    pub(super) fn source_text(&self) -> String {
         self.editor.with_buffer(|buffer| {
             let mut out = String::new();
-            for (i, line) in buffer.lines.iter().enumerate() {
-                if i > 0 {
-                    out.push('\n');
-                }
+            for line in buffer.lines.iter() {
                 out.push_str(line.text());
+                out.push_str(line.ending().as_str());
             }
             out
         })
@@ -276,6 +291,9 @@ impl EditorState {
             _ => self.close_undo_group(),
         }
         self.editor.action(&mut self.font_system, action);
+        if mutates(action) {
+            self.restyle();
+        }
     }
 
     pub(super) fn undo(&mut self) {
@@ -283,6 +301,7 @@ impl EditorState {
         if let Some(previous) = self.undo.pop() {
             self.redo.push(self.editor.clone());
             self.editor = previous;
+            self.restyle();
         }
     }
 
@@ -291,6 +310,7 @@ impl EditorState {
         if let Some(next) = self.redo.pop() {
             self.undo.push(self.editor.clone());
             self.editor = next;
+            self.restyle();
         }
     }
 
@@ -316,6 +336,7 @@ impl EditorState {
         }
         self.remember_undo();
         self.editor.delete_selection();
+        self.restyle();
         self.notice = Some("Cut selection".into());
     }
 
@@ -324,6 +345,7 @@ impl EditorState {
             Ok(text) if !text.is_empty() => {
                 self.remember_undo();
                 self.editor.insert_string(&text, None);
+                self.restyle();
                 self.notice = Some("Pasted clipboard text".into());
             }
             Ok(_) => self.notice = Some("Clipboard is empty".into()),
@@ -363,48 +385,41 @@ impl EditorState {
         self.toggle_format(Format::Italic);
     }
 
+    // Toggle an inline mark by splicing real markers into the text (`**bold**`),
+    // so it survives save; the scanner restyles the span next pass. Single line
+    // only for now, multi-line selections are left alone :P
+    // TODO: above
     fn toggle_format(&mut self, format: Format) {
         let Some((start, end)) = self.editor.selection_bounds() else {
             return;
         };
-        if start == end {
+        if start == end || start.line != end.line {
             return;
         }
+        let marker = match format {
+            Format::Bold => "**",
+            Format::Italic => "*",
+        };
         self.remember_undo();
-        self.editor
-            .with_buffer_mut(|buffer| apply_span_format(buffer, start, end, format));
-    }
-
-    /// Serialize the live buffer into markdown blocks, preserving inline marks
-    pub(super) fn serialize_blocks(&self) -> Vec<Block> {
-        self.editor.with_buffer(|buffer| {
-            let mut blocks = Vec::new();
-            let mut paragraph: Vec<Inline> = Vec::new();
-
-            let flush = |paragraph: &mut Vec<Inline>, blocks: &mut Vec<Block>| {
-                if paragraph.is_empty() {
-                    return;
-                }
-                blocks.push(Block {
-                    id: BlockId::new(),
-                    kind: BlockKind::Paragraph(std::mem::take(paragraph)),
-                });
-            };
-
-            for line in buffer.lines.iter() {
-                let text = line.text();
-                if text.trim().is_empty() {
-                    flush(&mut paragraph, &mut blocks);
-                    continue;
-                }
-                if !paragraph.is_empty() {
-                    paragraph.push(Inline::SoftBreak);
-                }
-                append_line_inlines(text, line.attrs_list(), &mut paragraph);
-            }
-            flush(&mut paragraph, &mut blocks);
-            blocks
-        })
+        let line = start.line;
+        // Splice the trailing marker first (this was painful to discover)
+        self.editor.with_buffer_mut(|buffer| {
+            let text = buffer.lines[line].text();
+            let mut next = String::with_capacity(text.len() + marker.len() * 2);
+            next.push_str(&text[..start.index]);
+            next.push_str(marker);
+            next.push_str(&text[start.index..end.index]);
+            next.push_str(marker);
+            next.push_str(&text[end.index..]);
+            let ending = buffer.lines[line].ending();
+            // restyle() overwrites this list right after, so a bare empty one is fine.
+            let empty = cosmic_text::AttrsList::new(&cosmic_text::Attrs::new());
+            buffer.lines[line].set_text(next, ending, empty);
+        });
+        let caret = Cursor::new(line, end.index + marker.len() * 2);
+        self.editor.set_cursor(caret);
+        self.editor.set_selection(Selection::None);
+        self.restyle();
     }
 
     pub(super) fn status(&self) -> String {
@@ -481,6 +496,19 @@ impl EditorState {
             None
         })
     }
+}
+
+/// Whether an editor action changes the buffer text (and thus needs a restyle ;P).
+fn mutates(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Insert(_)
+            | Action::Backspace
+            | Action::Delete
+            | Action::Enter
+            | Action::Indent
+            | Action::Unindent
+    )
 }
 
 #[cfg(not(target_family = "wasm"))]
