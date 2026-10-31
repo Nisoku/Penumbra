@@ -93,9 +93,7 @@ pub fn build_pending_link(
 pub fn card_at_world(cards: &[NoteCardVM], wx: f32, wy: f32) -> Option<i32> {
     cards
         .iter()
-        .find(|card| {
-            wx >= card.x && wx <= card.x + CARD_W && wy >= card.y && wy <= card.y + CARD_H
-        })
+        .find(|card| wx >= card.x && wx <= card.x + CARD_W && wy >= card.y && wy <= card.y + CARD_H)
         .map(|card| card.id)
 }
 

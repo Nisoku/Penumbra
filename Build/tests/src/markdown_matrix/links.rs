@@ -4,7 +4,6 @@ use penumbra_markdown::links::{
 use penumbra_markdown::parser::parse_document;
 use penumbra_markdown::render::markdown::render_markdown;
 
-
 fn links_of(body: &str) -> Vec<String> {
     extract_wikilinks(&parse_document(body).unwrap())
 }

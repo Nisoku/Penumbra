@@ -52,7 +52,11 @@ impl Ctx {
         }
     }
 
-    pub(super) fn handle(&mut self, event: Event<'_>, range: &std::ops::Range<usize>) -> Result<()> {
+    pub(super) fn handle(
+        &mut self,
+        event: Event<'_>,
+        range: &std::ops::Range<usize>,
+    ) -> Result<()> {
         use Event::*;
         match event {
             Start(tag) => {

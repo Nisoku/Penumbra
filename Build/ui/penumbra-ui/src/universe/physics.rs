@@ -90,9 +90,7 @@ fn settle_frame(state: Rc<SharedState>, handle: slint::Weak<AppWindow>, frame: u
     });
 }
 
-pub(crate) fn settled_positions(
-    layout: &penumbra_layout::LayoutEngine,
-) -> Vec<(i32, (f32, f32))> {
+pub(crate) fn settled_positions(layout: &penumbra_layout::LayoutEngine) -> Vec<(i32, (f32, f32))> {
     layout
         .all_positions()
         .iter()

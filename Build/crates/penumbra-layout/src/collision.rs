@@ -144,10 +144,7 @@ fn half_diag(bounds: &Bounds) -> f64 {
 
 /// Push apart every overlapping node pair across the whole graph. Returns the
 /// resolved positions aligned with `positions`. Pinned nodes are never moved.
-pub(crate) fn resolve_all(
-    field: &CollisionField<'_>,
-    positions: &[Position],
-) -> Vec<Position> {
+pub(crate) fn resolve_all(field: &CollisionField<'_>, positions: &[Position]) -> Vec<Position> {
     let search_radius = field.search_radius();
     let mut pos = positions.to_vec();
 

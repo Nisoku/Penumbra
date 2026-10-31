@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::map::MapCamera;
-use crate::rich_editor::RichEditor;
 use crate::platform::Instant;
+use crate::rich_editor::RichEditor;
 use crate::NoteCardVM;
 use futures::lock::Mutex as AsyncMutex;
 use penumbra_app::Universe;

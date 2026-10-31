@@ -4,7 +4,7 @@ use std::time::Duration;
 use slint::ComponentHandle;
 
 use crate::app_state::{
-    ease_in_out_cubic, SharedState, CameraGlide, FIT_MARGIN, FIT_MAX_ZOOM, FIT_MIN_ZOOM,
+    ease_in_out_cubic, CameraGlide, SharedState, FIT_MARGIN, FIT_MAX_ZOOM, FIT_MIN_ZOOM,
     GLIDE_DURATION, GLIDE_EPSILON, GLIDE_TICK, TOP_BAR_HEIGHT,
 };
 use crate::editor_session::maybe_reveal_editor;

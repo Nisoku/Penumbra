@@ -201,12 +201,9 @@ fn test_tokenizer_bytes() -> Vec<u8> {
 fn test_model() -> (ArcticEmbedXS, tokenizers::Tokenizer, Device) {
     let device = Device::Cpu;
     let config = test_config_bytes();
-    let vb = candle_nn::VarBuilder::from_buffered_safetensors(
-        test_safetensors(),
-        DType::F32,
-        &device,
-    )
-    .unwrap();
+    let vb =
+        candle_nn::VarBuilder::from_buffered_safetensors(test_safetensors(), DType::F32, &device)
+            .unwrap();
     let model = ArcticEmbedXS::new(&config, vb).unwrap();
     let tokenizer = tokenizers::Tokenizer::from_bytes(test_tokenizer_bytes()).unwrap();
     (model, tokenizer, device)

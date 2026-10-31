@@ -354,8 +354,11 @@ pub(crate) fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
 
     on_edit!(on_editor_undo, |session| session.undo());
     on_edit!(on_editor_redo, |session| session.redo());
-    on_edit!(on_editor_input_key, |session, text, shift, control, meta, alt| session
-        .input_key(&text, shift, control, meta, alt));
+    on_edit!(
+        on_editor_input_key,
+        |session, text, shift, control, meta, alt| session
+            .input_key(&text, shift, control, meta, alt)
+    );
     on_edit!(on_editor_cut_selection, |session| session.cut_selection());
     on_edit!(on_editor_paste_clipboard, |session| session
         .paste_clipboard());

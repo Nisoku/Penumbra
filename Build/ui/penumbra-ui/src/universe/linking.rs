@@ -4,9 +4,7 @@ use slint::ComponentHandle;
 
 use penumbra_core::position::Position;
 
-use crate::app_state::{
-    build_note_cards, note_code, pinned_note_ids, set_status, SharedState,
-};
+use crate::app_state::{build_note_cards, note_code, pinned_note_ids, set_status, SharedState};
 use crate::AppWindow;
 
 use super::physics::{settled_positions, start_ambient_settle};

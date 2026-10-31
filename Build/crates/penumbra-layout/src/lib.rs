@@ -447,7 +447,8 @@ impl LayoutEngine {
             pinned: &pinned,
             config: &self.config,
         };
-        let resolved = collision::resolve_neighborhood(&field, &self.positions_f64(), center, radius);
+        let resolved =
+            collision::resolve_neighborhood(&field, &self.positions_f64(), center, radius);
         for (i, p) in resolved.iter().enumerate() {
             self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
         }
