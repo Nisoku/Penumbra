@@ -61,6 +61,14 @@ export component NoteCard inherits Rectangle {
         background: Theme.accent-soft;
     }
 
+    if root.selected: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 3px;
+        height: parent.height;
+        background: Theme.accent;
+    }
+
     VerticalLayout {
         padding: 16px;
         spacing: 4px;
@@ -79,6 +87,7 @@ export component NoteCard inherits Rectangle {
             color: Theme.ink-secondary;
             wrap: TextWrap.word-wrap;
             overflow: elide;
+            max-height: 44px;
         }
 
         if root.zoom >= 0.55 && root.card.tags != "": Text {

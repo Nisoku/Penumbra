@@ -1,0 +1,3 @@
+[submodule "vendor/slint"]
+	path = vendor/slint
+	url = https://github.com/NellowTCS/slint/

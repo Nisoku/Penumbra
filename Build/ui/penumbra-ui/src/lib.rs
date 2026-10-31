@@ -1,6 +1,7 @@
 pub mod display;
 pub mod map;
 mod platform;
+pub mod rich_editor;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -19,7 +20,7 @@ use penumbra_core::note::Note;
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
 use penumbra_core::EmbeddingProvider;
-use penumbra_editor::session::EditorSession;
+use crate::rich_editor::RichEditor;
 use penumbra_embed::SimpleEmbedder;
 use penumbra_index::VectorIndex;
 use penumbra_layout::LayoutEngine;
@@ -60,10 +61,9 @@ struct SharedState {
     selected: AtomicI32,
     dirty: AtomicBool,
     drift: Mutex<Option<Drift>>,
-    editor: Mutex<Option<EditorSession>>,
+    editor: Mutex<Option<RichEditor>>,
     editor_note: Mutex<Option<NoteId>>,
     editor_title: Mutex<Option<String>>,
-    editor_model: Mutex<Option<Rc<slint::VecModel<BlockVM>>>>,
     editor_dirty: AtomicBool,
     edit_pending: AtomicI32,
     glide: Mutex<Option<CameraGlide>>,
@@ -110,7 +110,6 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         editor: Mutex::new(None),
         editor_note: Mutex::new(None),
         editor_title: Mutex::new(None),
-        editor_model: Mutex::new(None),
         editor_dirty: AtomicBool::new(false),
         edit_pending: AtomicI32::new(0),
         glide: Mutex::new(None),
@@ -476,70 +475,6 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
     }
 }
 
-fn publish_editor_blocks(state: &SharedState, ui: &AppWindow) {
-    apply_editor_rows(state, ui);
-}
-
-/// Republish the block model after a keystroke
-fn refresh_editor_live(state: &SharedState, ui: &AppWindow) {
-    apply_editor_rows(state, ui);
-    live_patch_card(state, ui);
-}
-
-/// Build the block rows a session maps to plus its active row
-pub fn editor_block_rows(session: &EditorSession) -> (Vec<BlockVM>, usize) {
-    let blocks = session.blocks();
-    let active = session.active();
-    let rows = blocks
-        .iter()
-        .enumerate()
-        .map(|(idx, block)| BlockVM {
-            id: idx as i32,
-            text: display::display_text(block).into(),
-            edit_text: block.text.clone().into(),
-            is_active: idx == active,
-            kind: display::kind_name(&block.kind).into(),
-            level: display::heading_level(block) as i32,
-            language: display::code_language(block).into(),
-        })
-        .collect();
-    (rows, active)
-}
-
-/// Push the editor block rows to the model
-fn apply_editor_rows(state: &SharedState, ui: &AppWindow) {
-    let guard = state.editor.lock().unwrap();
-    let Some(session) = guard.as_ref() else {
-        return;
-    };
-    let (vm, active) = editor_block_rows(session);
-    drop(guard);
-
-    let mut model_guard = state.editor_model.lock().unwrap();
-    match model_guard.as_ref().cloned() {
-        Some(model) => {
-            while model.row_count() > vm.len() {
-                let _ = model.remove_row(model.row_count() - 1);
-            }
-            for (i, row) in vm.into_iter().enumerate() {
-                if i < model.row_count() {
-                    model.set_row_data(i, row);
-                } else {
-                    model.push(row);
-                }
-            }
-        }
-        None => {
-            let model = Rc::new(slint::VecModel::from(vm));
-            ui.set_editor_blocks(slint::ModelRc::new(Rc::clone(&model)));
-            *model_guard = Some(model);
-        }
-    }
-    drop(model_guard);
-
-    ui.set_editor_focus_id(active as i32);
-}
-
 /// Keep the note's card on the map faithful to the in-editor edits. The card
 /// is hidden behind the full-screen panel, so patching it live just makes the
 /// restored view instantly current.
@@ -549,7 +484,7 @@ fn live_patch_card(state: &SharedState, _ui: &AppWindow) {
         let Some(session) = editor_guard.as_ref() else {
             return;
         };
-        session.raw_body().chars().take(80).collect::<String>()
+        session.text().chars().take(80).collect::<String>()
     };
     let title = {
         let title_guard = state.editor_title.lock().unwrap();
@@ -590,12 +525,12 @@ fn prepare_editor_session(
     title: String,
     body: String,
 ) {
-    *state.editor.lock().unwrap() = Some(EditorSession::new(&body));
+    *state.editor.lock().unwrap() = Some(RichEditor::new(&body));
     *state.editor_note.lock().unwrap() = Some(note_id);
     *state.editor_title.lock().unwrap() = Some(title.clone());
-    state.editor_dirty.store(true, Ordering::Relaxed);
-    ui.set_editor_title(title.into());
-    publish_editor_blocks(state, ui);
+    state.editor_dirty.store(false, Ordering::Relaxed);
+    ui.set_note_title(title.into());
+    refresh_rich_editor_surface(state, ui);
     let glide_done = state.glide.lock().unwrap().is_none();
     if glide_done {
         maybe_reveal_editor(state, ui);
@@ -610,7 +545,7 @@ fn finish_editor_session(state: &Rc<SharedState>, ui: &AppWindow) {
             let title_edit = state.editor_title.lock().unwrap();
             match (editor.as_ref(), note_edit.as_ref(), title_edit.as_ref()) {
                 (Some(session), Some(note_id), Some(title)) => {
-                    Some((*note_id, session.raw_body(), title.clone()))
+                    Some((*note_id, session.to_markdown(), title.clone()))
                 }
                 _ => None,
             }
@@ -622,7 +557,6 @@ fn finish_editor_session(state: &Rc<SharedState>, ui: &AppWindow) {
     *state.editor_note.lock().unwrap() = None;
     *state.editor_title.lock().unwrap() = None;
     ui.set_editor_open(false);
-    ui.set_editor_blocks(slint::ModelRc::default());
     if let Some((note_id, body, title)) = pending {
         let state_inner = Rc::clone(state);
         let uiw = ui.as_weak();
@@ -656,6 +590,30 @@ fn schedule_editor_save(state: &Rc<SharedState>, ui: slint::Weak<AppWindow>) {
     });
 }
 
+fn refresh_rich_editor_surface(state: &SharedState, ui: &AppWindow) {
+    let mut guard = state.editor.lock().unwrap();
+    let Some(editor) = guard.as_mut() else {
+        return;
+    };
+    let surface = editor.surface();
+    let status = editor.status();
+    let (caret_x, caret_y, caret_h) = editor.caret_rect();
+    let focused = editor.is_focused();
+    drop(guard);
+    ui.set_editor_surface(surface);
+    ui.set_editor_status(status.into());
+    ui.set_editor_caret_x(caret_x);
+    ui.set_editor_caret_y(caret_y);
+    ui.set_editor_caret_h(caret_h);
+    ui.set_editor_caret_on(focused);
+    // The surface is a rasterized image set from Rust. Setting the property
+    // marks it dirty, but under the winit wait loop the window will not repaint
+    // until an unrelated event wakes it
+    ui.window().request_redraw();
+}
+
+
+
 async fn flush_editor_changes(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
     if !state.editor_dirty.swap(false, Ordering::Relaxed) {
         return;
@@ -669,7 +627,7 @@ async fn flush_editor_changes(state: Rc<SharedState>, ui: slint::Weak<AppWindow>
         else {
             return;
         };
-        (*note_id, session.raw_body(), title.clone())
+        (*note_id, session.to_markdown(), title.clone())
     };
     apply_editor_save(&state, &ui, note_id, body, title).await;
 }
@@ -767,48 +725,11 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
     {
         let state = Rc::clone(state);
         let handle = ui.as_weak();
-        ui.on_open_editor(move |block_id| {
-            let Some(ui) = handle.upgrade() else {
-                return;
-            };
-            let mut guard = state.editor.lock().unwrap();
-            if let Some(session) = guard.as_mut() {
-                session.set_active(block_id.max(0) as usize);
-                drop(guard);
-                publish_editor_blocks(&state, &ui);
-            }
-        });
-    }
-
-    {
-        let state = Rc::clone(state);
-        let handle = ui.as_weak();
         ui.on_close_editor(move || {
             let Some(ui) = handle.upgrade() else {
                 return;
             };
             finish_editor_session(&state, &ui);
-        });
-    }
-
-    {
-        let state = Rc::clone(state);
-        let handle = ui.as_weak();
-        ui.on_editor_text_changed(move |block_id, text| {
-            let Some(ui) = handle.upgrade() else {
-                return;
-            };
-            let mut guard = state.editor.lock().unwrap();
-            let Some(session) = guard.as_mut() else {
-                return;
-            };
-            if session.active() != (block_id as usize) {
-                return;
-            }
-            session.apply_active_text(text.as_str());
-            drop(guard);
-            refresh_editor_live(&state, &ui);
-            schedule_editor_save(&state, handle.clone());
         });
     }
 
@@ -828,48 +749,6 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
     {
         let state = Rc::clone(state);
         let handle = ui.as_weak();
-        ui.on_editor_split(move |block_id, caret| {
-            let Some(ui) = handle.upgrade() else {
-                return;
-            };
-            let mut guard = state.editor.lock().unwrap();
-            let Some(session) = guard.as_mut() else {
-                return;
-            };
-            if session.active() != (block_id as usize) {
-                return;
-            }
-            session.split_active_at(caret.max(0) as usize);
-            drop(guard);
-            publish_editor_blocks(&state, &ui);
-            schedule_editor_save(&state, handle.clone());
-        });
-    }
-
-    {
-        let state = Rc::clone(state);
-        let handle = ui.as_weak();
-        ui.on_editor_merge_up(move |block_id| {
-            let Some(ui) = handle.upgrade() else {
-                return;
-            };
-            let mut guard = state.editor.lock().unwrap();
-            let Some(session) = guard.as_mut() else {
-                return;
-            };
-            if session.active() != (block_id as usize) {
-                return;
-            }
-            session.merge_into_previous();
-            drop(guard);
-            publish_editor_blocks(&state, &ui);
-            schedule_editor_save(&state, handle.clone());
-        });
-    }
-
-    {
-        let state = Rc::clone(state);
-        let handle = ui.as_weak();
         ui.on_editor_undo(move || {
             let Some(ui) = handle.upgrade() else {
                 return;
@@ -879,7 +758,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
                 session.undo();
             }
             drop(guard);
-            publish_editor_blocks(&state, &ui);
+            refresh_rich_editor_surface(&state, &ui);
             schedule_editor_save(&state, handle.clone());
         });
     }
@@ -896,7 +775,7 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
                 session.redo();
             }
             drop(guard);
-            publish_editor_blocks(&state, &ui);
+            refresh_rich_editor_surface(&state, &ui);
             schedule_editor_save(&state, handle.clone());
         });
     }
@@ -904,17 +783,181 @@ fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
     {
         let state = Rc::clone(state);
         let handle = ui.as_weak();
-        ui.on_editor_move_active(move |delta| {
+        ui.on_editor_input_key(move |text, shift, control, meta| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            let mut guard = state.editor.lock().unwrap();
+            let Some(session) = guard.as_mut() else {
+                return;
+            };
+            session.input_key(&text, shift, control, meta);
+            drop(guard);
+            refresh_rich_editor_surface(&state, &ui);
+            live_patch_card(&state, &ui);
+            schedule_editor_save(&state, handle.clone());
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_focus_changed(move |focused| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.set_focused(focused);
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_pointer_down(move |x, y| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.pointer_down(x, y);
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_pointer_drag(move |x, y| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.pointer_drag(x, y);
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_pointer_double_click(move |x, y| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.pointer_double_click(x, y);
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_pointer_scroll(move |pixels| {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.pointer_scroll(pixels);
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_toggle_bold(move || {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.toggle_bold();
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_toggle_italic(move || {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.toggle_italic();
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_copy_selection(move || {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.copy_selection();
+            }
+            refresh_rich_editor_surface(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_cut_selection(move || {
             let Some(ui) = handle.upgrade() else {
                 return;
             };
             let mut guard = state.editor.lock().unwrap();
             if let Some(session) = guard.as_mut() {
-                let next = (session.active() as i32) + delta;
-                session.set_active(next.max(0) as usize);
+                session.cut_selection();
+                drop(guard);
+                refresh_rich_editor_surface(&state, &ui);
+                live_patch_card(&state, &ui);
+                schedule_editor_save(&state, handle.clone());
             }
-            drop(guard);
-            publish_editor_blocks(&state, &ui);
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_paste_clipboard(move || {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            let mut guard = state.editor.lock().unwrap();
+            if let Some(session) = guard.as_mut() {
+                session.paste_clipboard();
+                drop(guard);
+                refresh_rich_editor_surface(&state, &ui);
+                live_patch_card(&state, &ui);
+                schedule_editor_save(&state, handle.clone());
+            }
+        });
+    }
+
+    {
+        let state = Rc::clone(state);
+        let handle = ui.as_weak();
+        ui.on_editor_select_all(move || {
+            let Some(ui) = handle.upgrade() else {
+                return;
+            };
+            if let Some(session) = state.editor.lock().unwrap().as_mut() {
+                session.select_all();
+            }
+            refresh_rich_editor_surface(&state, &ui);
         });
     }
 }

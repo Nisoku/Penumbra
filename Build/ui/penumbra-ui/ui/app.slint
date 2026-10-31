@@ -1,5 +1,5 @@
 import { Theme, PillButton, TopBar } from "@penumbra-component/index.slint";
-import { BlockVM, NoteCardVM } from "data.slint";
+import { NoteCardVM } from "data.slint";
 import { MapCanvas } from "map-canvas.slint";
 import { EditorPanel } from "editor-panel.slint";
 
@@ -9,6 +9,11 @@ export component AppWindow inherits Window {
     preferred-height: 700px;
     background: Theme.ground;
 
+    in property <image> editor-surface;
+    in property <length> editor-caret-x: 0px;
+    in property <length> editor-caret-y: 0px;
+    in property <length> editor-caret-h: 29px;
+    in property <bool> editor-caret-on: false;
     callback new-note();
     in property <string> status: "opening universe";
     in property <bool> ready: false;
@@ -20,20 +25,25 @@ export component AppWindow inherits Window {
     in-out property <length> camera-y: 0px;
     in-out property <float> zoom: 1;
     in-out property <int> selected-note: -1;
-    in property <[BlockVM]> editor-blocks: [];
-    in property <bool> editor-open: false;
-    in property <string> editor-title: "";
-    in property <int> editor-focus-id: -1;
-    in-out property <length> editor-scroll-y: 0px;
-    callback open-editor(int);
+    in property <string> note-title: "";
+    in property <string> editor-status: "";
+    in-out property <bool> editor-open: false;
     callback close-editor();
-    callback editor-text-changed(int, string);
-    callback editor-title-changed(string);
-    callback editor-split(int, int);
-    callback editor-merge-up(int);
+    callback editor-input-key(string, bool, bool, bool);
+    callback editor-focus-changed(bool);
+    callback editor-pointer-down(length, length);
+    callback editor-pointer-drag(length, length);
+    callback editor-pointer-double-click(length, length);
+    callback editor-pointer-scroll(length);
+    callback editor-toggle-bold();
+    callback editor-toggle-italic();
+    callback editor-copy-selection();
+    callback editor-cut-selection();
+    callback editor-paste-clipboard();
+    callback editor-select-all();
     callback editor-undo();
     callback editor-redo();
-    callback editor-move-active(int);
+    callback editor-title-changed(string);
     callback open-note(int);
     callback camera-changed(length, length, float);
     callback note-selected(int);
@@ -79,20 +89,30 @@ export component AppWindow inherits Window {
         y: 0px;
         width: root.width;
         height: root.height;
-        blocks: root.editor-blocks;
         open: root.editor-open;
-        note-title: root.editor-title;
-        focus-id: root.editor-focus-id;
-        editor-scroll-y <=> root.editor-scroll-y;
-        open-block(id) => { root.open-editor(id); }
+        note-title: root.note-title;
+        surface: root.editor-surface;
+        editor-status: root.editor-status;
+        caret-x: root.editor-caret-x;
+        caret-y: root.editor-caret-y;
+        caret-h: root.editor-caret-h;
+        caret-on: root.editor-caret-on;
         close => { root.close-editor(); }
-        text-changed(id, text) => { root.editor-text-changed(id, text); }
-        title-changed(text) => { root.editor-title-changed(text); }
-        split(id, caret) => { root.editor-split(id, caret); }
-        merge-up(id) => { root.editor-merge-up(id); }
+        input-key(text, shift, control, meta) => { root.editor-input-key(text, shift, control, meta); }
+        focus-changed(focused) => { root.editor-focus-changed(focused); }
+        pointer-down(x, y) => { root.editor-pointer-down(x, y); }
+        pointer-drag(x, y) => { root.editor-pointer-drag(x, y); }
+        pointer-double-click(x, y) => { root.editor-pointer-double-click(x, y); }
+        pointer-scroll(pixels) => { root.editor-pointer-scroll(pixels); }
+        toggle-bold => { root.editor-toggle-bold(); }
+        toggle-italic => { root.editor-toggle-italic(); }
+        copy-selection => { root.editor-copy-selection(); }
+        cut-selection => { root.editor-cut-selection(); }
+        paste-clipboard => { root.editor-paste-clipboard(); }
+        select-all => { root.editor-select-all(); }
         undo => { root.editor-undo(); }
         redo => { root.editor-redo(); }
-        move-active(delta) => { root.editor-move-active(delta); }
+        title-changed(text) => { root.editor-title-changed(text); }
     }
 
     PillButton {
@@ -115,9 +135,9 @@ export component AppWindow inherits Window {
         key-pressed(event) => {
             if (event.text == Key.Escape && root.editor-open) {
                 root.close-editor();
-                accept;
+                return accept;
             }
-            reject;
+            return reject;
         }
     }
 }

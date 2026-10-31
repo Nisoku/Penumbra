@@ -9,6 +9,8 @@ export component PillButton inherits Rectangle {
     height: 46px;
     border-radius: Theme.radius-pill;
     background: Theme.accent;
+    border-width: 1px;
+    border-color: Theme.accent;
     drop-shadow-offset-x: 0px;
     drop-shadow-offset-y: 3px;
     drop-shadow-blur: 18px;
@@ -22,6 +24,15 @@ export component PillButton inherits Rectangle {
         border-radius: root.width / 2;
         background: hover-glow.has-hover ? Theme.accent-hover : transparent;
         animate background { duration: 120ms; easing: ease-out; }
+    }
+
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: 1px;
+        border-radius: 1px;
+        background: Theme.card-highlight;
     }
 
     Rectangle {

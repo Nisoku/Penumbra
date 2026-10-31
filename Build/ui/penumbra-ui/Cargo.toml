@@ -29,6 +29,9 @@ penumbra-layout = { path = "../../crates/penumbra-layout" }
 penumbra-graph = { path = "../../crates/penumbra-graph" }
 penumbra-auto-link = { path = "../../crates/penumbra-auto-link" }
 penumbra-index = { path = "../../crates/penumbra-index" }
+cosmic-text = "0.19"
+arboard = { version = "3.7", default-features = false }
+png = "0.18"
 
 [features]
 default = []

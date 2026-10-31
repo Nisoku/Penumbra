@@ -1,211 +1,56 @@
-import { Theme, ProseBlock, HeadingBlock, QuoteBlock, CodeBlock, TableBlock, FootnoteBlock, HtmlBlock, BreakBlock } from "@penumbra-component/index.slint";
-import { BlockVM } from "data.slint";
-
-component ActiveBlock inherits Rectangle {
-    in property <BlockVM> block;
-    in property <int> focus-id;
-
-    callback text-changed(int, string);
-    callback split(int, int);
-    callback merge-up(int);
-    callback undo();
-    callback redo();
-    callback move-active(int);
-    callback close();
-
-    width: 100%;
-    border-radius: 8px;
-    background: Theme.card-glass;
-    border-width: 1px;
-    border-color: Theme.accent-soft;
-
-    Rectangle {
-        x: 0px;
-        y: 8px;
-        width: 2px;
-        height: Math.max(parent.height - 16px, 20px);
-        border-radius: 1px;
-        background: Theme.accent;
-    }
-
-    editor-field := TextInput {
-        x: 16px;
-        y: 8px;
-        width: parent.width - 32px;
-        height: self.preferred-height;
-        text: root.block.edit-text;
-        color: Theme.ink;
-        selection-background-color: Theme.accent;
-        selection-foreground-color: Theme.on-accent;
-        font-family: root.block.kind == "code" ? "monospace" : "";
-        font-size: root.block.kind == "code" ? 12.5px : 15px;
-        single-line: root.block.kind == "heading";
-        wrap: TextWrap.word-wrap;
-        init => {
-            if (root.focus-id == root.block.id) {
-                self.focus();
-            }
-        }
-        edited => { root.text-changed(root.block.id, self.text); }
-        key-pressed(event) => {
-            if (event.modifiers.control || event.modifiers.meta) {
-                if (event.text == "z") {
-                    if (event.modifiers.shift) {
-                        root.redo();
-                    } else {
-                        root.undo();
-                    }
-                }
-                accept;
-            } else if (event.text == Key.Return && !(root.block.kind == "code") && !event.modifiers.shift) {
-                root.split(root.block.id, self.cursor-position-byte-offset);
-                accept;
-            } else if (event.text == Key.Backspace && self.cursor-position-byte-offset == 0) {
-                root.merge-up(root.block.id);
-                accept;
-            } else if (event.text == Key.UpArrow && root.block.kind == "heading") {
-                root.move-active(-1);
-                accept;
-            } else if (event.text == Key.DownArrow && root.block.kind == "heading") {
-                root.move-active(1);
-                accept;
-            } else if (event.text == Key.Escape) {
-                root.close();
-                accept;
-            } else {
-                reject;
-            }
-        }
-    }
-
-    height: editor-field.height + 16px;
-}
-
-component BlockRow inherits VerticalLayout {
-    in property <BlockVM> block;
-    in property <int> focus-id;
-
-    callback open-block(int);
-    callback text-changed(int, string);
-    callback split(int, int);
-    callback merge-up(int);
-    callback undo();
-    callback redo();
-    callback move-active(int);
-    callback close();
-    callback anchor(length, length);
-
-    spacing: 0px;
-    width: 100%;
-    height: self.preferred-height;
-
-    animate height { duration: 130ms; easing: ease-out; }
-
-    if root.block.is-active: ActiveBlock {
-        block: root.block;
-        focus-id: root.focus-id;
-        width: parent.width;
-        text-changed(id, text) => { root.text-changed(id, text); }
-        split(id, caret) => { root.split(id, caret); }
-        merge-up(id) => { root.merge-up(id); }
-        undo => { root.undo(); }
-        redo => { root.redo(); }
-        move-active(delta) => { root.move-active(delta); }
-        close => { root.close(); }
-    }
-
-    if !root.block.is-active: VerticalLayout {
-        spacing: 0px;
-        width: parent.width;
-
-        if root.block.kind == "paragraph" || root.block.kind == "list": ProseBlock {
-            content: root.block.text;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "heading": HeadingBlock {
-            content: root.block.text;
-            level: root.block.level;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "quote": QuoteBlock {
-            content: root.block.text;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "code": CodeBlock {
-            content: root.block.text;
-            language: root.block.language;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "table": TableBlock {
-            content: root.block.text;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "footnote": FootnoteBlock {
-            content: root.block.text;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "html": HtmlBlock {
-            content: root.block.text;
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-
-        if root.block.kind == "break": BreakBlock {
-            width: parent.width;
-            open() => { root.open-block(root.block.id); }
-        }
-    }
-
-    anchor-timer := Timer {
-        interval: 150ms;
-        running: root.block.is-active;
-        triggered => {
-            anchor-timer.running = false;
-            root.anchor(root.y, root.height);
-        }
-    }
-}
+import { Theme } from "@penumbra-component/index.slint";
 
 export component EditorPanel inherits Rectangle {
     background: transparent;
     visible: root.open;
     clip: true;
 
-    in property <[BlockVM]> blocks: [];
     in property <bool> open: false;
-    in-out property <length> editor-scroll-y: 0px;
     in property <string> note-title: "";
-    in property <int> focus-id: -1;
-    callback open-block(int);
+    in property <image> surface;
+    in property <string> editor-status: "";
+    in property <length> caret-x: 0px;
+    in property <length> caret-y: 0px;
+    in property <length> caret-h: 29px;
+    in property <bool> caret-on: false;
     callback close();
-    callback text-changed(int, string);
     callback title-changed(string);
-    callback split(int, int);
-    callback merge-up(int);
+    callback input-key(string, bool, bool, bool);
+    callback pointer-down(length, length);
+    callback pointer-drag(length, length);
+    callback pointer-double-click(length, length);
+    callback pointer-scroll(length);
+    callback toggle-bold();
+    callback toggle-italic();
+    callback copy-selection();
+    callback cut-selection();
+    callback paste-clipboard();
+    callback select-all();
     callback undo();
     callback redo();
-    callback move-active(int);
+    callback focus-changed(bool);
 
-    function scroll_to(y: length, height: length) -> length {
-        if body.height <= 0px { return 0px; }
-        let target = y - (body.height - height) * 0.5;
-        let max_y = column.preferred-height - body.height;
-        if max_y <= 0px { return 0px; }
-        if target >= max_y { return max_y; }
-        if target >= 0px { return target; }
-        return 0px;
+    property <length> chrome-height: 52px;
+    property <length> footer-height: 48px;
+    property <length> surface-width: 760px;
+    property <length> surface-height: 440px;
+    property <length> editor-x: (root.width - root.surface-width) / 2;
+    property <length> editor-y: root.chrome-height + Math.max(24px, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
+    property <bool> pointer-down-active: false;
+    property <bool> blink-phase: false;
+
+    // Grab keyboard focus the moment the editor becomes visible so typing
+    // works immediately hehe
+    changed open => {
+        if (root.open) {
+            editor-focus.focus();
+        }
+    }
+
+    blink-timer := Timer {
+        interval: 530ms;
+        running: root.open && editor-focus.has-focus;
+        triggered => { root.blink-phase = !root.blink-phase; }
     }
 
     dim := Rectangle {
@@ -215,172 +60,251 @@ export component EditorPanel inherits Rectangle {
         height: parent.height;
         background: Theme.scrim;
         opacity: root.open ? 1 : 0;
-        animate opacity { duration: 260ms; easing: ease-out; }
+        animate opacity { duration: 180ms; easing: ease-out; }
     }
 
-    panel-surface := Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 100%;
-        height: 100%;
-        background: Theme.ground;
-        opacity: root.open ? 1 : 0;
-        animate opacity { duration: 240ms; easing: ease-out; }
+    editor-shell := Rectangle {
+        x: root.editor-x - 28px;
+        y: root.editor-y - 24px;
+        width: root.surface-width + 56px;
+        height: root.surface-height + 48px;
+        border-radius: 22px;
+        background: Theme.card-glass;
+        border-width: 1px;
+        border-color: Theme.hairline;
+    }
+
+    shell-highlight := Rectangle {
+        x: editor-shell.x + 1px;
+        y: editor-shell.y + 1px;
+        width: editor-shell.width - 2px;
+        height: 1px;
+        border-radius: 1px;
+        background: Theme.card-highlight;
+    }
+
+    editor-surface := Rectangle {
+        x: root.editor-x;
+        y: root.editor-y;
+        width: root.surface-width;
+        height: root.surface-height;
+        border-radius: 14px;
+        background: Theme.ground-sunken;
+        border-width: editor-focus.has-focus ? 2px : 1px;
+        border-color: editor-focus.has-focus ? Theme.accent : Theme.hairline;
+        clip: true;
+        animate border-color { duration: 140ms; easing: ease-out; }
 
         Rectangle {
+            x: 0px;
             y: 0px;
             width: parent.width;
-            height: 96px;
-
-            HorizontalLayout {
-                x: 32px;
-                y: 24px;
-                width: parent.width - 64px;
-                height: 48px;
-                spacing: 16px;
-                alignment: center;
-
-                title-edit := TextInput {
-                    horizontal-stretch: 1;
-                    height: 100%;
-                    vertical-alignment: center;
-                    text: root.note-title;
-                    font-size: 28px;
-                    font-weight: 600;
-                    color: Theme.ink;
-                    single-line: true;
-                    init => { self.focus(); }
-                    edited => { root.title-changed(self.text); }
-
-                    key-pressed(event) => {
-                        if (event.text == Key.Escape) {
-                            root.close();
-                            accept;
-                        }
-                        reject;
-                    }
-
-                    if self.text == "" && !self.has-focus: Text {
-                        height: 100%;
-                        width: 100%;
-                        text: "Untitled";
-                        font-size: 28px;
-                        font-weight: 600;
-                        color: Theme.placeholder;
-                        vertical-alignment: center;
-                    }
-                }
-
-                Text {
-                    text: root.blocks.length == 1 ? "1 block" : "\{root.blocks.length} blocks";
-                    font-size: 11px;
-                    letter-spacing: 0.3px;
-                    color: Theme.placeholder;
-                    vertical-alignment: center;
-                }
-            }
-
-            Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: Theme.hairline;
-            }
-        }
-
-        body := Flickable {
-            y: 96px;
-            width: parent.width;
-            height: parent.height - 96px - 36px;
-            content-y <=> root.editor-scroll-y;
-            content-width: self.width;
-            content-height: Math.max(column.preferred-height, self.height);
-
-            HorizontalLayout {
-                width: parent.width;
-                alignment: center;
-
-                column := VerticalLayout {
-                    width: Math.min(parent.width - 96px, 720px);
-                    padding-top: 28px;
-                    padding-bottom: 48px;
-                    padding-left: 32px;
-                    padding-right: 32px;
-                    spacing: 4px;
-
-                    for block in root.blocks: BlockRow {
-                        block: block;
-                        focus-id: root.focus-id;
-                        width: parent.width;
-                        open-block(id) => { root.open-block(id); }
-                        text-changed(id, text) => { root.text-changed(id, text); }
-                        split(id, caret) => { root.split(id, caret); }
-                        merge-up(id) => { root.merge-up(id); }
-                        undo => { root.undo(); }
-                        redo => { root.redo(); }
-                        move-active(delta) => { root.move-active(delta); }
-                        close => { root.close(); }
-                        anchor(top, height) => { root.editor-scroll-y = scroll_to(top, height); }
-                    }
-                }
-            }
-        }
-
-        if root.blocks.length == 0: Rectangle {
-            y: 96px;
-            width: parent.width;
-            height: parent.height - 96px - 36px;
-
-            VerticalLayout {
-                width: 100%;
-                height: 100%;
-                spacing: 6px;
-                alignment: center;
-
-                Text {
-                    horizontal-alignment: center;
-                    text: "This note is empty";
-                    font-size: 17px;
-                    font-weight: 600;
-                    color: Theme.ink;
-                }
-
-                Text {
-                    horizontal-alignment: center;
-                    text: "Start writing, return at a caret splits a block";
-                    font-size: 13px;
-                    color: Theme.placeholder;
-                }
-            }
+            height: parent.height;
+            border-radius: 14px;
+            background: Theme.ground;
+            opacity: 0.82;
         }
 
         Rectangle {
-            y: parent.height - 36px;
+            x: 0px;
+            y: 0px;
             width: parent.width;
-            height: 36px;
+            height: 1px;
+            background: Theme.card-highlight;
+        }
 
-            Rectangle {
-                y: 0px;
-                width: parent.width;
-                height: 1px;
-                background: Theme.hairline;
-            }
+        Image {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            source: root.surface;
+            image-fit: contain;
+            image-rendering: smooth;
+        }
 
-            HorizontalLayout {
-                x: 32px;
-                y: 0px;
-                width: parent.width - 64px;
-                height: parent.height;
-                alignment: end;
+        // Blinking caret overlay
+        caret := Rectangle {
+            x: root.caret-x;
+            y: root.caret-y;
+            width: 2px;
+            height: root.caret-h;
+            background: Theme.accent;
+            visible: root.caret-on && editor-focus.has-focus;
+            opacity: root.blink-phase ? 0.0 : 1.0;
+        }
+    }
 
-                Text {
-                    vertical-alignment: center;
-                    text: "return splits, esc closes the note";
-                    font-size: 11px;
-                    letter-spacing: 0.3px;
-                    color: Theme.placeholder;
+    editor-focus := FocusScope {
+        x: root.editor-x;
+        y: root.editor-y;
+        width: root.surface-width;
+        height: root.surface-height;
+
+        changed has-focus => { root.focus-changed(self.has-focus); }
+
+        key-pressed(event) => {
+            if (event.modifiers.control || event.modifiers.meta) {
+                if (event.text == "z") {
+                    if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                } else if (event.text == "y" && event.modifiers.control) {
+                    root.redo();
+                } else if (event.text == "b") {
+                    root.toggle-bold();
+                } else if (event.text == "i") {
+                    root.toggle-italic();
+                } else if (event.text == "c") {
+                    root.copy-selection();
+                } else if (event.text == "x") {
+                    root.cut-selection();
+                } else if (event.text == "v") {
+                    root.paste-clipboard();
+                } else if (event.text == "a") {
+                    root.select-all();
                 }
+                accept;
+            } else if (event.text == Key.Backspace) {
+                root.input-key("Backspace", false, false, false);
+                accept;
+            } else if (event.text == Key.Delete) {
+                root.input-key("Delete", false, false, false);
+                accept;
+            } else if (event.text == Key.Return) {
+                root.input-key("Enter", false, false, false);
+                accept;
+            } else if (event.text == Key.LeftArrow) {
+                root.input-key("Left", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.RightArrow) {
+                root.input-key("Right", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.UpArrow) {
+                root.input-key("Up", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.DownArrow) {
+                root.input-key("Down", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.Home) {
+                root.input-key("Home", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.End) {
+                root.input-key("End", event.modifiers.shift, false, false);
+                accept;
+            } else if (event.text == Key.Escape) {
+                root.close();
+                accept;
+            } else if (event.text != "") {
+                root.input-key(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.meta);
+                accept;
+            } else {
+                reject;
             }
+        }
+    }
+
+    pointer-area := TouchArea {
+        x: root.editor-x;
+        y: root.editor-y;
+        width: root.surface-width;
+        height: root.surface-height;
+        mouse-cursor: text;
+
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.pointer-down-active = true;
+                editor-focus.focus();
+                root.pointer-down(self.mouse-x, self.mouse-y);
+            } else if (event.kind == PointerEventKind.move && root.pointer-down-active) {
+                root.pointer-drag(self.mouse-x, self.mouse-y);
+            } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                root.pointer-down-active = false;
+            }
+        }
+
+        double-clicked => {
+            editor-focus.focus();
+            root.pointer-double-click(self.mouse-x, self.mouse-y);
+        }
+
+        scroll-event(event) => {
+            root.pointer-scroll(event.delta-y);
+            accept;
+        }
+    }
+
+    title-bar := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: root.chrome-height;
+        background: Theme.ground;
+
+        TextInput {
+            x: 32px;
+            y: 8px;
+            width: parent.width * 0.44;
+            height: 36px;
+            vertical-alignment: center;
+            text: root.note-title;
+            font-size: 20px;
+            font-weight: 600;
+            color: Theme.ink;
+            single-line: true;
+            edited => { root.title-changed(self.text); }
+
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        Text {
+            x: parent.width * 0.52;
+            y: 0px;
+            width: parent.width * 0.48 - 32px;
+            height: parent.height;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            text: root.editor-status;
+            font-size: 11px;
+            color: Theme.ink-secondary;
+            overflow: elide;
+        }
+
+        Rectangle {
+            y: parent.height - 1px;
+            width: parent.width;
+            height: 1px;
+            background: Theme.hairline;
+        }
+    }
+
+    footer := Rectangle {
+        x: 0px;
+        y: parent.height - root.footer-height;
+        width: parent.width;
+        height: root.footer-height;
+        background: Theme.ground;
+
+        Rectangle {
+            width: parent.width;
+            height: 1px;
+            background: Theme.hairline;
+        }
+
+        Text {
+            x: 32px;
+            y: 0px;
+            width: parent.width - 64px;
+            height: parent.height;
+            font-size: 11px;
+            color: Theme.ink-tertiary;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            text: "Cmd+B bold · Cmd+I italic · Cmd+C copy · Cmd+X cut · Cmd+V paste · Cmd+Z undo · Cmd+Shift+Z redo · Esc close";
         }
     }
 }
