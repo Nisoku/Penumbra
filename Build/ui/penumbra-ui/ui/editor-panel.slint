@@ -31,12 +31,13 @@ export component EditorPanel inherits Rectangle {
     callback redo();
     callback focus-changed(bool);
 
+    // did you know it's actually called chrome? lol Google Chrome is chrome
     property <length> chrome-height: 52px;
     property <length> footer-height: 48px;
-    property <length> surface-width: 760px;
-    property <length> surface-height: 440px;
+    property <length> surface-width: 940px;
+    property <length> surface-height: 560px;
     property <length> editor-x: (root.width - root.surface-width) / 2;
-    property <length> editor-y: root.chrome-height + Math.max(24px, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
+    property <length> editor-y: root.chrome-height + Math.max(16px, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
     property <bool> pointer-down-active: false;
     property <bool> blink-phase: false;
     // Consecutive click bookkeeping for synthesizing triple-click, such silly

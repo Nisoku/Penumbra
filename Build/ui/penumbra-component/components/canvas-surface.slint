@@ -18,6 +18,12 @@ export component CanvasSurface inherits Rectangle {
     property <length> cam-start-y: 0px;
     property <float> base-opacity:
         root.zoom >= 2.5 ? 0.0 : (root.zoom < 0.4 ? root.zoom / 0.4 : 1.0);
+    property <float> pan-rate: 1.0;
+
+    property <float> zoom-rate: 0.0022;
+    property <length> max-zoom-delta: 48px;
+    property <float> min-zoom: 0.2;
+    property <float> max-zoom: 5.0;
 
     base := Path {
         x: 0px;
@@ -85,20 +91,29 @@ export component CanvasSurface inherits Rectangle {
 
         moved => {
             if (root.dragging) {
-                root.camera-x = root.cam-start-x + (ta.mouse-x - root.drag-start-x);
-                root.camera-y = root.cam-start-y + (ta.mouse-y - root.drag-start-y);
+                root.camera-x = root.cam-start-x + (ta.mouse-x - root.drag-start-x) / root.zoom;
+                root.camera-y = root.cam-start-y + (ta.mouse-y - root.drag-start-y) / root.zoom;
                 root.camera-changed(root.camera-x, root.camera-y, root.zoom);
             }
         }
 
         scroll-event(event) => {
-            let old-zoom = root.zoom;
-            let new-zoom = Math.max(0.1, Math.min(5.0, old-zoom * (event.delta-y > 0px ? 1.1 : 1 / 1.1)));
-            root.camera-x = ta.mouse-x - (ta.mouse-x - root.camera-x) / old-zoom * new-zoom;
-            root.camera-y = ta.mouse-y - (ta.mouse-y - root.camera-y) / old-zoom * new-zoom;
-            root.zoom = new-zoom;
-            root.camera-changed(root.camera-x, root.camera-y, root.zoom);
-            accept
+            if (event.modifiers.control || event.modifiers.meta) {
+                let raw = event.delta-y;
+                let clamped = Math.max(-root.max-zoom-delta, Math.min(root.max-zoom-delta, raw));
+                let old-zoom = root.zoom;
+                let new-zoom = Math.max(root.min-zoom, Math.min(root.max-zoom, old-zoom * Math.exp(clamped / 1px * root.zoom-rate)));
+                root.camera-x += ta.mouse-x / old-zoom - ta.mouse-x / new-zoom;
+                root.camera-y += ta.mouse-y / old-zoom - ta.mouse-y / new-zoom;
+                root.zoom = new-zoom;
+                root.camera-changed(root.camera-x, root.camera-y, root.zoom);
+                accept
+            } else {
+                root.camera-x -= event.delta-x * root.pan-rate / root.zoom;
+                root.camera-y -= event.delta-y * root.pan-rate / root.zoom;
+                root.camera-changed(root.camera-x, root.camera-y, root.zoom);
+                accept
+            }
         }
     }
 }

@@ -6,7 +6,7 @@ use penumbra_markdown::ast::{Block, BlockId, BlockKind, Inline};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 use super::format::{apply_span_format, blend_rect, Format};
-use super::runs::{append_line_inlines, markdown_runs};
+use super::runs::{append_line_inlines, markdown_runs, BODY_LINE, BODY_SIZE};
 use super::{CONTENT_PADDING_BOTTOM, CONTENT_PADDING_TOP, CONTENT_PADDING_X, HEIGHT, WIDTH};
 
 pub(super) struct EditorState {
@@ -33,7 +33,7 @@ impl EditorState {
     pub(super) fn new(blocks: &[Block]) -> Self {
         let mut font_system = FontSystem::new();
         let cache = SwashCache::new();
-        let mut buffer = Buffer::new(&mut font_system, Metrics::new(18.0, 29.0));
+        let mut buffer = Buffer::new(&mut font_system, Metrics::new(BODY_SIZE, BODY_LINE));
         buffer.set_size(
             Some((WIDTH as i32 - CONTENT_PADDING_X * 2) as f32),
             Some((HEIGHT as i32 - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM) as f32),
@@ -98,9 +98,11 @@ impl EditorState {
                 self.editor
                     .set_selection(Selection::Normal(self.editor.cursor()));
             }
-            self.editor.action(&mut self.font_system, Action::Drag { x, y });
+            self.editor
+                .action(&mut self.font_system, Action::Drag { x, y });
         } else {
-            self.editor.action(&mut self.font_system, Action::Click { x, y });
+            self.editor
+                .action(&mut self.font_system, Action::Click { x, y });
         }
     }
 
@@ -481,6 +483,7 @@ impl EditorState {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn write_clipboard(text: &str) -> Result<(), String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
     clipboard
@@ -488,7 +491,21 @@ fn write_clipboard(text: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn read_clipboard() -> Result<String, String> {
     let mut clipboard = arboard::Clipboard::new().map_err(|error| error.to_string())?;
     clipboard.get_text().map_err(|error| error.to_string())
+}
+
+// The browser Clipboard API is async-only which is annoying sometimes
+#[cfg(target_family = "wasm")]
+fn write_clipboard(text: &str) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no browser window")?;
+    let _ = window.navigator().clipboard().write_text(text);
+    Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+fn read_clipboard() -> Result<String, String> {
+    Err("paste is handled by the browser on the web build".into())
 }

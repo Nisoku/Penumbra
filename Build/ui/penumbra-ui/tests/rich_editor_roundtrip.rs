@@ -89,9 +89,64 @@ fn empty_document_serializes_empty() {
     assert_eq!(editor.to_markdown(), "");
 }
 
-const PADDING_X: f32 = 28.0;
-const PADDING_TOP: f32 = 24.0;
-const HALF_LINE: f32 = 14.5;
+#[test]
+fn strikethrough_inline_round_trips() {
+    let editor = RichEditor::new("keep ~~gone~~ keep");
+    let out = editor.to_markdown();
+    assert!(
+        out.contains("~~gone~~"),
+        "expected strikethrough preserved, got: {out:?}"
+    );
+}
+
+#[test]
+fn ordered_list_round_trips() {
+    let editor = RichEditor::new("1. first\n2. second\n3. third");
+    let out = editor.to_markdown();
+    for marker in ["1. first", "2. second", "3. third"] {
+        assert!(
+            out.contains(marker),
+            "expected ordered marker {marker:?}, got: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn heading_levels_render_at_distinct_sizes() {
+    let mut h1 = RichEditor::new("# Observatory");
+    let mut h3 = RichEditor::new("### Observatory");
+    assert_ne!(
+        h1.surface_rgba(),
+        h3.surface_rgba(),
+        "H1 and H3 produced identical surfaces; heading sizes are not varying"
+    );
+}
+
+#[test]
+fn quote_renders_distinct_from_paragraph() {
+    let mut quote = RichEditor::new("> remembered weather");
+    let mut plain = RichEditor::new("remembered weather");
+    assert_ne!(
+        quote.surface_rgba(),
+        plain.surface_rgba(),
+        "quote surface matches plain paragraph; quote styling is not applied"
+    );
+}
+
+#[test]
+fn table_renders_distinct_from_plain_text() {
+    let mut table = RichEditor::new("| a | b |\n| - | - |\n| 1 | 2 |");
+    let mut plain = RichEditor::new("a b 1 2");
+    assert_ne!(
+        table.surface_rgba(),
+        plain.surface_rgba(),
+        "table surface matches plain text; grid rendering is not applied"
+    );
+}
+
+const PADDING_X: f32 = 30.0;
+const PADDING_TOP: f32 = 22.0;
+const HALF_LINE: f32 = 12.0;
 
 #[test]
 fn click_at_glyph_origin_lands_at_line_start() {

@@ -30,7 +30,6 @@ penumbra-graph = { path = "../../crates/penumbra-graph" }
 penumbra-auto-link = { path = "../../crates/penumbra-auto-link" }
 penumbra-index = { path = "../../crates/penumbra-index" }
 cosmic-text = "0.19"
-arboard = { version = "3.7", default-features = false }
 png = "0.18"
 
 [features]
@@ -41,9 +40,11 @@ candle-wasm = ["candle-load"]
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = { version = "0.2" }
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Clipboard"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+arboard = { version = "3.7", default-features = false }
 
 [build-dependencies]
 slint-build.workspace = true

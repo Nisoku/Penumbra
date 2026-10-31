@@ -3,6 +3,7 @@
 mod engine;
 mod format;
 mod runs;
+mod runs_table;
 
 use engine::EditorState;
 use penumbra_markdown::ast::{Block, BlockId, BlockKind, Document, Inline};
@@ -11,11 +12,12 @@ use penumbra_markdown::render::markdown::render_markdown;
 use slint::Image;
 use std::{cell::RefCell, rc::Rc};
 
-const WIDTH: u32 = 760;
-const HEIGHT: u32 = 440;
-const CONTENT_PADDING_X: i32 = 28;
-const CONTENT_PADDING_TOP: i32 = 24;
-const CONTENT_PADDING_BOTTOM: i32 = 28;
+// TODO: make dynamic and responsive
+const WIDTH: u32 = 940;
+const HEIGHT: u32 = 560;
+const CONTENT_PADDING_X: i32 = 30;
+const CONTENT_PADDING_TOP: i32 = 22;
+const CONTENT_PADDING_BOTTOM: i32 = 22;
 
 /// A handle to the rich editor.
 ///
