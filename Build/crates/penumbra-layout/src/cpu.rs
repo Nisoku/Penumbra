@@ -191,13 +191,18 @@ impl CpuForceLayout {
     }
 
     pub fn set_positions(&mut self, positions: &[Position]) {
-        let n = self.positions.len().min(positions.len());
-        for i in 0..n {
-            let moved = (self.positions[i].x - positions[i].x).abs() > f64::EPSILON
-                || (self.positions[i].y - positions[i].y).abs() > f64::EPSILON;
-            self.positions[i] = positions[i];
+        // no this isn't janky i promise /hj
+        for ((current, incoming), velocity) in self
+            .positions
+            .iter_mut()
+            .zip(positions.iter())
+            .zip(self.velocities.iter_mut())
+        {
+            let moved = (current.x - incoming.x).abs() > f64::EPSILON
+                || (current.y - incoming.y).abs() > f64::EPSILON;
+            *current = *incoming;
             if moved {
-                self.velocities[i] = Position::new(0.0, 0.0);
+                *velocity = Position::new(0.0, 0.0);
             }
         }
     }

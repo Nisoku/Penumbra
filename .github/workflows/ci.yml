@@ -156,7 +156,7 @@ jobs:
           if-no-files-found: error
 
   deploy-pages:
-    name: Deploy web demo (gh-pages)
+    name: Deploy web demo
     runs-on: ubuntu-latest
     timeout-minutes: 60
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
