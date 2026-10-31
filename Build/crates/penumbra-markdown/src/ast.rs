@@ -178,6 +178,11 @@ pub enum Inline {
     TagRef {
         name: String,
     },
+    /// A raw inline HTML span
+    InlineHtml(String),
+    /// A footnote reference such as `[^1]`; `name` is the label without the
+    /// `[^` `]` delimiters.
+    FootnoteRef(String),
     LineBreak,
     SoftBreak,
 }
@@ -197,6 +202,12 @@ impl Inline {
             Inline::Image { alt, .. } => buf.push_str(alt),
             Inline::NoteEmbed { note_ref } => buf.push_str(note_ref),
             Inline::TagRef { name } => buf.push_str(name),
+            Inline::InlineHtml(html) => buf.push_str(&strip_html(html)),
+            Inline::FootnoteRef(name) => {
+                buf.push_str("[^");
+                buf.push_str(name);
+                buf.push(']');
+            }
             Inline::LineBreak | Inline::SoftBreak => buf.push(' '),
         }
     }

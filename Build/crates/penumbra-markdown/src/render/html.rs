@@ -301,6 +301,15 @@ fn render_inlines(inlines: &[Inline], buf: &mut String) {
                     escape_html(name),
                 ));
             }
+            Inline::InlineHtml(html) => {
+                buf.push_str(html);
+            }
+            Inline::FootnoteRef(name) => {
+                buf.push_str(&format!(
+                    "<sup class=\"footnote-ref\"><a href=\"#{0}\">{0}</a></sup>",
+                    escape_html(name),
+                ));
+            }
             Inline::LineBreak => buf.push_str("<br>\n"),
             Inline::SoftBreak => buf.push('\n'),
         }

@@ -423,8 +423,8 @@ fn inline_html_stays_inline_in_paragraph() {
         BlockKind::Paragraph(children) => {
             assert_eq!(children.len(), 4);
             assert_eq!(children[0], Text("hello ".to_string()));
-            assert_eq!(children[1], Text("<b>".to_string()));
-            assert_eq!(children[3], Text("</b>".to_string()));
+            assert_eq!(children[1], InlineHtml("<b>".to_string()));
+            assert_eq!(children[3], InlineHtml("</b>".to_string()));
         }
         other => panic!("expected Paragraph, got {:?}", other),
     }
@@ -838,6 +838,7 @@ const ROUNDTRIP_CORPUS: &[&str] = &[
     "| H1 | H2 |\n| --- | --- |\n| C1 | C2 |",
     "| a\\|b | **c** |\n| :--- | ---: |\n| x | y |",
     "<div>\nraw html\n</div>",
+    "Press <kbd>Cmd</kbd> to continue",
     "A note[^1] with a reference.\n\n[^1]: The note text",
     "See [[other note]] and #tagged",
     "![alt text](https://example.com/img.png \"title\")",

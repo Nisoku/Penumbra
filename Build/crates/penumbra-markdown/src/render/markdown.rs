@@ -252,6 +252,12 @@ fn serialize_inlines(inlines: &[Inline], out: &mut String) {
                 out.push('#');
                 out.push_str(name);
             }
+            Inline::InlineHtml(html) => out.push_str(html),
+            Inline::FootnoteRef(name) => {
+                out.push_str("[^");
+                out.push_str(name);
+                out.push(']');
+            }
             Inline::LineBreak => out.push_str("  \n"),
             Inline::SoftBreak => out.push('\n'),
         }

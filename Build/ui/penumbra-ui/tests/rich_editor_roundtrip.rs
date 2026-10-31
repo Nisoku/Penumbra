@@ -24,9 +24,9 @@ fn two_paragraphs_keep_separation() {
 fn typing_appends_text() {
     let mut editor = RichEditor::new("Start");
     // Caret begins at the document start; move to end, then type.
-    editor.input_key("End", false, false, false);
+    editor.input_key("End", false, false, false, false);
     for ch in " more".chars() {
-        editor.input_key(&ch.to_string(), false, false, false);
+        editor.input_key(&ch.to_string(), false, false, false, false);
     }
     assert!(
         editor.to_markdown().contains("Start more"),
@@ -62,4 +62,80 @@ fn code_inline_round_trips() {
 fn empty_document_serializes_empty() {
     let editor = RichEditor::new("");
     assert_eq!(editor.to_markdown(), "");
+}
+
+const PADDING_X: f32 = 28.0;
+const PADDING_TOP: f32 = 24.0;
+const HALF_LINE: f32 = 14.5;
+
+#[test]
+fn click_at_glyph_origin_lands_at_line_start() {
+    let mut editor = RichEditor::new("first second third");
+    editor.surface();
+    // Surface x at the glyph origin, y mid-first-line.
+    editor.pointer_down(PADDING_X + 1.0, PADDING_TOP + HALF_LINE, false);
+    assert!(
+        editor.status().contains("caret: line 1 byte 0"),
+        "expected caret at line start, got: {}",
+        editor.status()
+    );
+}
+
+#[test]
+fn click_past_end_of_line_clamps_to_line_end() {
+    let text = "first second third";
+    let mut editor = RichEditor::new(text);
+    editor.surface();
+    editor.pointer_down(PADDING_X + 10_000.0, PADDING_TOP + HALF_LINE, false);
+    let expected = format!("caret: line 1 byte {}", text.len());
+    assert!(
+        editor.status().contains(&expected),
+        "expected caret clamped to line end ({expected}), got: {}",
+        editor.status()
+    );
+}
+
+#[test]
+fn double_click_selects_word() {
+    let mut editor = RichEditor::new("alpha beta gamma");
+    editor.surface();
+    // Aim near the middle of the first word, allowing for the padding offset.
+    editor.pointer_double_click(PADDING_X + 12.0, PADDING_TOP + HALF_LINE);
+    let status = editor.status();
+    assert!(
+        status.contains("Selection: line 1 byte 0 -> line 1 byte 5"),
+        "expected first word selected, got: {status}"
+    );
+}
+
+/// Triple-click selects the whole visual line/paragraph under the pointer.
+#[test]
+fn triple_click_selects_line() {
+    let text = "the quick brown fox";
+    let mut editor = RichEditor::new(text);
+    editor.surface();
+    editor.pointer_triple_click(PADDING_X + 12.0, PADDING_TOP + HALF_LINE);
+    let status = editor.status();
+    let expected = format!("Selection: line 1 byte 0 -> line 1 byte {}", text.len());
+    assert!(
+        status.contains(&expected),
+        "expected whole line selected ({expected}), got: {status}"
+    );
+}
+
+/// Shift+click extends the existing caret into a selection rather than
+/// collapsing to the clicked point.
+#[test]
+fn shift_click_extends_selection() {
+    let mut editor = RichEditor::new("alpha beta gamma");
+    editor.surface();
+    // Place the caret at the line start.
+    editor.pointer_down(PADDING_X + 1.0, PADDING_TOP + HALF_LINE, false);
+    // Shift+click further right extends a selection from the caret.
+    editor.pointer_down(PADDING_X + 10_000.0, PADDING_TOP + HALF_LINE, true);
+    let status = editor.status();
+    assert!(
+        status.starts_with("Selection: line 1 byte 0 ->"),
+        "expected extended selection from line start, got: {status}"
+    );
 }

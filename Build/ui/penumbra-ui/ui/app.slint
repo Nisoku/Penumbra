@@ -29,11 +29,12 @@ export component AppWindow inherits Window {
     in property <string> editor-status: "";
     in-out property <bool> editor-open: false;
     callback close-editor();
-    callback editor-input-key(string, bool, bool, bool);
+    callback editor-input-key(string, bool, bool, bool, bool);
     callback editor-focus-changed(bool);
-    callback editor-pointer-down(length, length);
+    callback editor-pointer-down(length, length, bool);
     callback editor-pointer-drag(length, length);
     callback editor-pointer-double-click(length, length);
+    callback editor-pointer-triple-click(length, length);
     callback editor-pointer-scroll(length);
     callback editor-toggle-bold();
     callback editor-toggle-italic();
@@ -98,11 +99,12 @@ export component AppWindow inherits Window {
         caret-h: root.editor-caret-h;
         caret-on: root.editor-caret-on;
         close => { root.close-editor(); }
-        input-key(text, shift, control, meta) => { root.editor-input-key(text, shift, control, meta); }
+        input-key(text, shift, control, meta, alt) => { root.editor-input-key(text, shift, control, meta, alt); }
         focus-changed(focused) => { root.editor-focus-changed(focused); }
-        pointer-down(x, y) => { root.editor-pointer-down(x, y); }
+        pointer-down(x, y, extend) => { root.editor-pointer-down(x, y, extend); }
         pointer-drag(x, y) => { root.editor-pointer-drag(x, y); }
         pointer-double-click(x, y) => { root.editor-pointer-double-click(x, y); }
+        pointer-triple-click(x, y) => { root.editor-pointer-triple-click(x, y); }
         pointer-scroll(pixels) => { root.editor-pointer-scroll(pixels); }
         toggle-bold => { root.editor-toggle-bold(); }
         toggle-italic => { root.editor-toggle-italic(); }

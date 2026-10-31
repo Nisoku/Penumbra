@@ -15,10 +15,11 @@ export component EditorPanel inherits Rectangle {
     in property <bool> caret-on: false;
     callback close();
     callback title-changed(string);
-    callback input-key(string, bool, bool, bool);
-    callback pointer-down(length, length);
+    callback input-key(string, bool, bool, bool, bool);
+    callback pointer-down(length, length, bool);
     callback pointer-drag(length, length);
     callback pointer-double-click(length, length);
+    callback pointer-triple-click(length, length);
     callback pointer-scroll(length);
     callback toggle-bold();
     callback toggle-italic();
@@ -38,6 +39,10 @@ export component EditorPanel inherits Rectangle {
     property <length> editor-y: root.chrome-height + Math.max(24px, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
     property <bool> pointer-down-active: false;
     property <bool> blink-phase: false;
+    // Consecutive click bookkeeping for synthesizing triple-click, such silly
+    property <int> click-count: 0;
+    property <length> last-click-x: -1000px;
+    property <length> last-click-y: -1000px;
 
     // Grab keyboard focus the moment the editor becomes visible so typing
     // works immediately hehe
@@ -51,6 +56,16 @@ export component EditorPanel inherits Rectangle {
         interval: 530ms;
         running: root.open && editor-focus.has-focus;
         triggered => { root.blink-phase = !root.blink-phase; }
+    }
+
+    // Resets the consecutive-click counter once the multi-click window lapses.
+    click-reset-timer := Timer {
+        interval: 400ms;
+        running: false;
+        triggered => {
+            root.click-count = 0;
+            self.running = false;
+        }
     }
 
     dim := Rectangle {
@@ -143,11 +158,55 @@ export component EditorPanel inherits Rectangle {
 
         changed has-focus => { root.focus-changed(self.has-focus); }
 
+        // Slint maps Cmd to `control` and the physical Ctrl key to `meta` on
+        // macOS... which is wrong.¸
         key-pressed(event) => {
-            if (event.modifiers.control || event.modifiers.meta) {
+            if (event.text == Key.Backspace) {
+                root.input-key("Backspace", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.Delete) {
+                root.input-key("Delete", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.Return) {
+                root.input-key("Enter", event.modifiers.shift, false, false, false);
+                accept;
+            } else if (event.text == Key.Tab) {
+                root.input-key("Tab", event.modifiers.shift, false, false, false);
+                accept;
+            } else if (event.text == Key.Backtab) {
+                root.input-key("BackTab", true, false, false, false);
+                accept;
+            } else if (event.text == Key.LeftArrow) {
+                root.input-key("Left", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.RightArrow) {
+                root.input-key("Right", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.UpArrow) {
+                root.input-key("Up", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.DownArrow) {
+                root.input-key("Down", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.Home) {
+                root.input-key("Home", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.End) {
+                root.input-key("End", event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
+                accept;
+            } else if (event.text == Key.PageUp) {
+                root.input-key("PageUp", event.modifiers.shift, false, false, false);
+                accept;
+            } else if (event.text == Key.PageDown) {
+                root.input-key("PageDown", event.modifiers.shift, false, false, false);
+                accept;
+            } else if (event.text == Key.Escape) {
+                root.close();
+                accept;
+            } else if (event.modifiers.control || event.modifiers.meta) {
                 if (event.text == "z") {
                     if (event.modifiers.shift) { root.redo(); } else { root.undo(); }
-                } else if (event.text == "y" && event.modifiers.control) {
+                } else if (event.text == "y" && event.modifiers.meta) {
                     root.redo();
                 } else if (event.text == "b") {
                     root.toggle-bold();
@@ -163,38 +222,8 @@ export component EditorPanel inherits Rectangle {
                     root.select-all();
                 }
                 accept;
-            } else if (event.text == Key.Backspace) {
-                root.input-key("Backspace", false, false, false);
-                accept;
-            } else if (event.text == Key.Delete) {
-                root.input-key("Delete", false, false, false);
-                accept;
-            } else if (event.text == Key.Return) {
-                root.input-key("Enter", false, false, false);
-                accept;
-            } else if (event.text == Key.LeftArrow) {
-                root.input-key("Left", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.RightArrow) {
-                root.input-key("Right", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.UpArrow) {
-                root.input-key("Up", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.DownArrow) {
-                root.input-key("Down", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.Home) {
-                root.input-key("Home", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.End) {
-                root.input-key("End", event.modifiers.shift, false, false);
-                accept;
-            } else if (event.text == Key.Escape) {
-                root.close();
-                accept;
             } else if (event.text != "") {
-                root.input-key(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.meta);
+                root.input-key(event.text, event.modifiers.shift, event.modifiers.control, event.modifiers.meta, event.modifiers.alt);
                 accept;
             } else {
                 reject;
@@ -213,20 +242,38 @@ export component EditorPanel inherits Rectangle {
             if (event.kind == PointerEventKind.down) {
                 root.pointer-down-active = true;
                 editor-focus.focus();
-                root.pointer-down(self.mouse-x, self.mouse-y);
+
+                if (Math.abs(self.mouse-x - root.last-click-x) < 4px
+                    && Math.abs(self.mouse-y - root.last-click-y) < 4px
+                    && root.click-count > 0) {
+                    root.click-count += 1;
+                } else {
+                    root.click-count = 1;
+                }
+                root.last-click-x = self.mouse-x;
+                root.last-click-y = self.mouse-y;
+                click-reset-timer.running = false;
+                click-reset-timer.running = true;
+
+                if (root.click-count >= 3) {
+                    root.pointer-triple-click(self.mouse-x, self.mouse-y);
+                    root.click-count = 0;
+                } else if (root.click-count == 2) {
+                    root.pointer-double-click(self.mouse-x, self.mouse-y);
+                } else {
+                    // Shift+click extends the current selection to the click.
+                    root.pointer-down(self.mouse-x, self.mouse-y, event.modifiers.shift);
+                }
             } else if (event.kind == PointerEventKind.move && root.pointer-down-active) {
+                editor-focus.focus();
                 root.pointer-drag(self.mouse-x, self.mouse-y);
             } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
                 root.pointer-down-active = false;
             }
         }
 
-        double-clicked => {
-            editor-focus.focus();
-            root.pointer-double-click(self.mouse-x, self.mouse-y);
-        }
-
         scroll-event(event) => {
+            editor-focus.focus();
             root.pointer-scroll(event.delta-y);
             accept;
         }
