@@ -20,8 +20,8 @@ use crate::app_state::{
 use crate::editor_session::{prepare_editor_session, wire_editor};
 use crate::map::MapCamera;
 use crate::universe::{
-    cancel_camera_glide, center_camera_on_cards, publish_visuals, rebuild_paths, start_glide,
-    viewport_size, wire_map,
+    cancel_camera_glide, center_camera_on_cards, publish_visuals, rebuild_paths,
+    start_ambient_settle, start_glide, viewport_size, wire_map,
 };
 use penumbra_app::Universe;
 use penumbra_auto_link::AutoLinker;
@@ -62,6 +62,9 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         editor_reveal: std::sync::atomic::AtomicBool::new(false),
         embedder: Mutex::new(None),
         linker: Mutex::new(None),
+        settling: std::sync::atomic::AtomicBool::new(false),
+        pending_link: Mutex::new(None),
+        user_panned: std::sync::atomic::AtomicBool::new(false),
     });
 
     wire_new_note(&ui, &state);
@@ -99,16 +102,31 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
-    set_status(&boot_ui, "loading embeddings...");
-
+/// Choose the live embedding provider
+async fn select_embedder(ui: &slint::Weak<AppWindow>) -> Arc<dyn EmbeddingProvider> {
     #[cfg(feature = "candle-load")]
     {
+        set_status(ui, "loading semantic model...");
         match penumbra_embed::candle::CandleEmbedder::load_cached().await {
-            Ok(_emb) => set_status(&boot_ui, "embeddings ready"),
-            Err(e) => set_status(&boot_ui, &format!("embedding load failed: {e}")),
+            Ok(emb) => {
+                set_status(ui, "semantic model ready");
+                return Arc::new(emb);
+            }
+            Err(e) => {
+                tracing::warn!("candle embedder unavailable, using hash embedder: {e}");
+                set_status(ui, "semantic model offline, using fallback");
+            }
         }
     }
+    #[cfg(not(feature = "candle-load"))]
+    {
+        let _ = ui;
+    }
+    Arc::new(SimpleEmbedder::new_384())
+}
+
+async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
+    set_status(&boot_ui, "loading embeddings...");
 
     match boot_universe().await {
         Ok(mut universe) => {
@@ -151,9 +169,11 @@ async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
 
             let graph_handle = universe.graph_handle();
             let events = universe.events();
-            let embedder: Arc<dyn EmbeddingProvider> = Arc::new(SimpleEmbedder::new_384());
+            let embedder: Arc<dyn EmbeddingProvider> = select_embedder(&boot_ui).await;
+            let dims = embedder.dimensions();
             let index: Arc<Mutex<dyn VectorIndex>> = Arc::new(Mutex::new(
-                penumbra_index::RuvectorIndex::new(384).expect("index for the 384-dim embedder"),
+                penumbra_index::RuvectorIndex::new(dims)
+                    .expect("vector index sized to the active embedder"),
             ));
             {
                 let notes: Vec<Note> = universe.graph().all_notes().cloned().collect();
@@ -207,6 +227,7 @@ async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
                 publish_visuals(&boot_state, &ui, cards, links);
                 center_camera_on_cards(&boot_state, &ui);
                 rebuild_paths(&boot_state, &ui);
+                start_ambient_settle(&boot_state, &ui);
             }
         }
         Err(err) => report_boot_failure(boot_ui, &err.to_string()),
@@ -345,6 +366,8 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
                 if let Some(ui) = ui.upgrade() {
                     ui.set_status(format!("universe ready - {} notes", count).into());
                     publish_visuals(&state, &ui, cards, links);
+                    // A new node lands at a random spot
+                    start_ambient_settle(&state, &ui);
                 }
             }
         }

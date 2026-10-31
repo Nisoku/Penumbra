@@ -9,7 +9,7 @@ use crate::app_state::{
     SAVE_DEBOUNCE,
 };
 use crate::rich_editor::RichEditor;
-use crate::universe::{publish_drift, publish_visuals, start_camera_glide};
+use crate::universe::{publish_drift, publish_visuals, start_ambient_settle, start_camera_glide};
 use crate::{platform, AppWindow};
 use slint::ComponentHandle;
 
@@ -214,10 +214,12 @@ async fn run_pipeline(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, note
     };
 
     let linker = state.linker.lock().unwrap().clone();
+    let mut links_changed = false;
     if let Some(linker) = linker {
         match linker.process_note(&note).await {
             Ok(created) if !created.is_empty() => {
                 tracing::info!("auto-link: {} new links", created.len());
+                links_changed = true;
             }
             Ok(_) => {}
             Err(e) => tracing::error!("auto-link failed: {e}"),
@@ -259,7 +261,12 @@ async fn run_pipeline(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, note
 
         if let Some(ui) = ui.upgrade() {
             publish_visuals(state, &ui, cards, links);
-            publish_drift(state, &ui, settled);
+            if links_changed {
+                // New edges reshape the whole constellation
+                start_ambient_settle(state, &ui);
+            } else {
+                publish_drift(state, &ui, settled);
+            }
         }
     }
 }

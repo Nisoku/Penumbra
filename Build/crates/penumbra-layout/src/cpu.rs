@@ -190,6 +190,18 @@ impl CpuForceLayout {
         &self.positions
     }
 
+    pub fn set_positions(&mut self, positions: &[Position]) {
+        let n = self.positions.len().min(positions.len());
+        for i in 0..n {
+            let moved = (self.positions[i].x - positions[i].x).abs() > f64::EPSILON
+                || (self.positions[i].y - positions[i].y).abs() > f64::EPSILON;
+            self.positions[i] = positions[i];
+            if moved {
+                self.velocities[i] = Position::new(0.0, 0.0);
+            }
+        }
+    }
+
     pub fn step(&mut self) -> Vec<Position> {
         if self.positions.is_empty() {
             return self.positions.clone();

@@ -2,6 +2,31 @@
 
 use penumbra_ui::rich_editor::RichEditor;
 
+#[test]
+fn first_render_matches_second_render() {
+    let mut editor = RichEditor::new("plain **bold** text\n\n## Heading\n\n`code` span");
+    let first = editor.surface_rgba();
+    let second = editor.surface_rgba();
+    assert_eq!(
+        first, second,
+        "first render differs from second with no input between them; \
+         the first surface shaped incompletely"
+    );
+}
+
+#[test]
+fn formatted_surface_differs_from_plain() {
+    let mut rich = RichEditor::new("plain **bold** text\n\n## Heading");
+    let mut plain = RichEditor::new("plain bold text\n\nHeading");
+    let rich_px = rich.surface_rgba();
+    let plain_px = plain.surface_rgba();
+    assert_ne!(
+        rich_px, plain_px,
+        "formatted surface is identical to the unformatted one; \
+         rich attributes are not being applied on the first render"
+    );
+}
+
 /// A paragraph of plain prose survives a construct/serialize round-trip.
 #[test]
 fn plain_paragraph_round_trips() {

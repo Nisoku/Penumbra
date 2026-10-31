@@ -4,6 +4,7 @@ export component CanvasSurface inherits Rectangle {
     in property <string> base-path: "";
     in property <string> mid-path: "";
     in property <string> top-path: "";
+    in property <string> overlay-path: "";
     in-out property <length> camera-x: 0px;
     in-out property <length> camera-y: 0px;
     in-out property <float> zoom: 1;
@@ -48,6 +49,17 @@ export component CanvasSurface inherits Rectangle {
         commands: root.top-path;
         stroke: Theme.edge-selected;
         stroke-width: 1.5px;
+        stroke-line-cap: round;
+    }
+
+    overlay := Path {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        commands: root.overlay-path;
+        stroke: Theme.accent;
+        stroke-width: 2px;
         stroke-line-cap: round;
     }
 

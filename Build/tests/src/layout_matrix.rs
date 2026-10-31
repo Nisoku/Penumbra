@@ -123,16 +123,13 @@ fn collision_resolves_overlap() {
     let pb = engine.get_position(&b).unwrap();
     let dist = pa.distance_to(&pb);
 
-    // Nodes should have been pushed apart.
     assert!(
         dist > 0.0,
         "collision avoidance should separate overlapping nodes"
     );
-    // Minimum separation: half-diagonal + half-diagonal + margin.
-    // half_diag = sqrt(100^2 + 60^2) / 2 = 58.31, margin = 10
-    // min_dist = 58.31 + 58.31 + 10.0 = 126.62, but with only 5 passes
-    // and max_push = 20 per pass, we may not reach full separation.
-    // Just verify they moved apart.
+    // A single step caps separation at max_collision_push per pass times the
+    // pass count, so one step from fully coincident will not reach the full
+    // target gap; assert only that the nodes moved meaningfully apart.
     assert!(
         dist > 10.0,
         "nodes only {dist} apart after collision resolve"
@@ -147,12 +144,13 @@ fn collision_skipped_without_bounds() {
     let mut engine = pollster::block_on(LayoutEngine::with_defaults());
     engine.add_node(a, false);
     engine.add_node(b, false);
-    // Same position, but NO bounds set. Collision avoidance is a no-op.
+    // Same position; strip b's default box so no pair can be formed.
     engine.set_position(&a, Position::new(100.0, 100.0));
     engine.set_position(&b, Position::new(100.0, 100.0));
 
-    // Bounds only set for a, not b. Should not crash or move.
+    // Bounds only on a; b has none, so no overlapping pair is checked.
     engine.set_node_bounds(a, Bounds::new(100.0, 60.0));
+    engine.clear_node_bounds(&b);
 
     let _d = engine.step();
     // b has no bounds so no pair is checked against it.
@@ -161,6 +159,149 @@ fn collision_skipped_without_bounds() {
     assert!(
         (pa.x - pb.x).abs() < 0.01 && (pa.y - pb.y).abs() < 0.01,
         "nodes should not have moved without matching bounds"
+    );
+}
+
+#[test]
+fn add_node_assigns_default_bounds() {
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    let a = NoteId::new();
+    engine.add_node(a, false);
+    let bounds = engine
+        .get_bounds(&a)
+        .expect("add_node should assign a default box");
+    assert_eq!(bounds, Bounds::new(180.0, 120.0));
+}
+
+#[test]
+fn default_bounds_separate_overlapping_added_nodes() {
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    // No explicit bounds call: the defaults from add_node must drive collision.
+    engine.set_position(&a, Position::new(100.0, 100.0));
+    engine.set_position(&b, Position::new(100.0, 100.0));
+
+    engine.step();
+
+    let dist = engine
+        .get_position(&a)
+        .unwrap()
+        .distance_to(&engine.get_position(&b).unwrap());
+    assert!(
+        dist > 10.0,
+        "default bounds should separate coincident nodes, got {dist}"
+    );
+}
+
+#[test]
+fn settle_separates_unpinned_card_from_pinned_neighbor() {
+    let pinned = NoteId::new();
+    let other = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+
+    engine.add_node(pinned, true);
+    engine.add_node(other, false);
+    engine.update_links(Vec::new());
+    engine.set_position(&pinned, Position::new(7.875, 49.244));
+    engine.set_position(&other, Position::new(7.942, 49.365));
+    // Re-pin at the loaded position so the pin anchor matches the saved spot.
+    engine.pin(&pinned, true);
+
+    let pin_before = engine.get_position(&pinned).unwrap();
+
+    for _ in 0..300 {
+        engine.step();
+    }
+
+    let pin_after = engine.get_position(&pinned).unwrap();
+    let other_after = engine.get_position(&other).unwrap();
+    let bounds = Bounds::new(180.0, 120.0);
+
+    assert!(
+        pin_before.distance_to(&pin_after) < 1e-3,
+        "pinned card moved: {pin_before:?} -> {pin_after:?}"
+    );
+    assert!(
+        !bounds.overlaps(&pin_after, &bounds, &other_after),
+        "unpinned card still overlaps its pinned neighbor: \
+         pinned={pin_after:?} other={other_after:?}"
+    );
+}
+
+#[test]
+fn single_step_collision_separates_stacked_unlinked_nodes() {
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    engine.update_links(Vec::new());
+    engine.set_position(&a, Position::new(7.875, 49.244));
+    engine.set_position(&b, Position::new(7.942, 49.365));
+
+    let before = engine
+        .get_position(&a)
+        .unwrap()
+        .distance_to(&engine.get_position(&b).unwrap());
+    engine.step();
+    let after = engine
+        .get_position(&a)
+        .unwrap()
+        .distance_to(&engine.get_position(&b).unwrap());
+    assert!(
+        after > before + 1.0,
+        "one step moved the stacked cards only {before}->{after}"
+    );
+}
+
+#[test]
+fn boot_run_separates_stacked_unlinked_cards() {
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    // Saved positions from a persisted stack.
+    engine.set_position(&a, Position::new(7.875, 49.244));
+    engine.set_position(&b, Position::new(7.942, 49.365));
+    // No links, as the real vault has none between these two notes.
+    engine.update_links(Vec::new());
+    engine.run();
+
+    let pa = engine.get_position(&a).unwrap();
+    let pb = engine.get_position(&b).unwrap();
+    let bounds = Bounds::new(180.0, 120.0);
+    assert!(
+        !bounds.overlaps(&pa, &bounds, &pb),
+        "boot run left cards overlapping: a={pa:?} b={pb:?}"
+    );
+}
+
+#[test]
+fn settle_fully_separates_near_coincident_cards() {
+    let a = NoteId::new();
+    let b = NoteId::new();
+    let mut engine = pollster::block_on(LayoutEngine::with_defaults());
+    engine.add_node(a, false);
+    engine.add_node(b, false);
+    // Mimic a persisted overlap: two card-sized boxes ~0.14 units apart.
+    engine.set_position(&a, Position::new(7.875, 49.244));
+    engine.set_position(&b, Position::new(7.942, 49.365));
+
+    // Run a generous number of settle frames, as the ambient loop does.
+    for _ in 0..300 {
+        engine.step();
+    }
+
+    let pa = engine.get_position(&a).unwrap();
+    let pb = engine.get_position(&b).unwrap();
+    let bounds = Bounds::new(180.0, 120.0);
+    assert!(
+        !bounds.overlaps(&pa, &bounds, &pb),
+        "cards still overlap after settle: a={pa:?} b={pb:?}"
     );
 }
 

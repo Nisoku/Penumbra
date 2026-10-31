@@ -12,9 +12,13 @@ export component NoteCard inherits Rectangle {
     callback note-released(int, length, length);
     callback note-pinned(int, length, length);
     callback note-unpinned(int);
+    callback link-start(int);
+    callback link-move(int, length, length);
+    callback link-end(int, length, length);
 
     property <bool> dragging: false;
     property <bool> right-dragging: false;
+    property <bool> linking: false;
     property <length> grab-offset-x: 0px;
     property <length> grab-offset-y: 0px;
     property <length> last-x: 0px;
@@ -111,12 +115,20 @@ export component NoteCard inherits Rectangle {
         pointer-event(event) => {
             if (event.kind == PointerEventKind.down) {
                 if (event.button == PointerEventButton.left) {
-                    root.dragging = true;
-                    root.grab-offset-x = ta.pressed-x;
-                    root.grab-offset-y = ta.pressed-y;
-                    root.last-x = root.card.x;
-                    root.last-y = root.card.y;
-                    root.note-selected(root.card.id);
+                    // Alt (Option) + left drag draws a manual link to another
+                    // card; a plain left drag moves this one.
+                    if (event.modifiers.alt) {
+                        root.linking = true;
+                        root.link-start(root.card.id);
+                        root.link-move(root.card.id, root.card.x + ta.pressed-x / root.zoom, root.card.y + ta.pressed-y / root.zoom);
+                    } else {
+                        root.dragging = true;
+                        root.grab-offset-x = ta.pressed-x;
+                        root.grab-offset-y = ta.pressed-y;
+                        root.last-x = root.card.x;
+                        root.last-y = root.card.y;
+                        root.note-selected(root.card.id);
+                    }
                 } else if (event.button == PointerEventButton.right) {
                     root.right-dragging = true;
                     root.grab-offset-x = ta.pressed-x;
@@ -125,7 +137,10 @@ export component NoteCard inherits Rectangle {
                     root.last-y = root.card.y;
                 }
             } else if (event.kind == PointerEventKind.up) {
-                if (root.dragging) {
+                if (root.linking) {
+                    root.linking = false;
+                    root.link-end(root.card.id, root.card.x + ta.mouse-x / root.zoom, root.card.y + ta.mouse-y / root.zoom);
+                } else if (root.dragging) {
                     root.dragging = false;
                     root.note-released(root.card.id, root.last-x, root.last-y);
                 } else if (root.right-dragging) {
@@ -142,9 +157,11 @@ export component NoteCard inherits Rectangle {
         }
 
         moved => {
-            if (root.dragging || root.right-dragging) {
-                root.last-x = root.card.x + (ta.mouse-x - root.grab-offset-x);
-                root.last-y = root.card.y + (ta.mouse-y - root.grab-offset-y);
+            if (root.linking) {
+                root.link-move(root.card.id, root.card.x + ta.mouse-x / root.zoom, root.card.y + ta.mouse-y / root.zoom);
+            } else if (root.dragging || root.right-dragging) {
+                root.last-x = root.card.x + (ta.mouse-x - root.grab-offset-x) / root.zoom;
+                root.last-y = root.card.y + (ta.mouse-y - root.grab-offset-y) / root.zoom;
                 root.note-moved(root.card.id, root.last-x, root.last-y);
             }
         }

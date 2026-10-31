@@ -40,6 +40,27 @@ pub(crate) const GLIDE_EPSILON: f32 = 0.5;
 pub(crate) const SAVE_DEBOUNCE: Duration = Duration::from_millis(500);
 pub(crate) const PERSIST_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Delay between ambient-settle frames.
+pub(crate) const SETTLE_TICK: Duration = Duration::from_millis(40);
+/// Global layout steps advanced per ambient-settle frame.
+pub(crate) const SETTLE_STEPS_PER_FRAME: usize = 3;
+/// Mean per-node displacement (world px) below which the map is considered
+/// settled and the ambient loop stops.
+pub(crate) const SETTLE_CONVERGENCE: f64 = 0.35;
+/// Upper bound on ambient-settle frames so the loop always terminates even if
+/// the simulation keeps jittering.
+pub(crate) const SETTLE_MAX_FRAMES: u32 = 240;
+
+/// Fraction of the viewport the fitted constellation fills, leaving a margin so
+/// cards never touch the edges.
+pub(crate) const FIT_MARGIN: f32 = 0.88;
+/// Smallest fit-to-view zoom, so a very spread constellation stays legible
+/// rather than collapsing to specks.
+pub(crate) const FIT_MIN_ZOOM: f32 = 0.35;
+/// Largest fit-to-view zoom, so a single note is framed comfortably instead of
+/// filling the whole plane.
+pub(crate) const FIT_MAX_ZOOM: f32 = 1.4;
+
 /// The single state object shared across every event handler
 pub(crate) struct SharedState {
     pub(crate) universe: AsyncMutex<Option<Universe>>,
@@ -60,6 +81,20 @@ pub(crate) struct SharedState {
     pub(crate) editor_reveal: AtomicBool,
     pub(crate) embedder: Mutex<Option<Arc<dyn EmbeddingProvider>>>,
     pub(crate) linker: Mutex<Option<Arc<AutoLinker>>>,
+    /// True while the ambient-settle loop is running, so only one is ever
+    /// armed at a time; a fresh request just extends the running loop.
+    pub(crate) settling: AtomicBool,
+    /// The in-progress manual link drag, if the user is dragging from a card.
+    pub(crate) pending_link: Mutex<Option<PendingLink>>,
+    /// Set once the user pans or zooms the map by hand.
+    pub(crate) user_panned: AtomicBool,
+}
+
+/// An in-progress manual link drag from a source card to the pointer.
+pub(crate) struct PendingLink {
+    pub(crate) source_card: i32,
+    /// Current pointer position in world coordinates.
+    pub(crate) pointer: (f32, f32),
 }
 
 /// One card's in-flight settle animation: interpolate `from` towards `to`.

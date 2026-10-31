@@ -40,6 +40,12 @@ impl RichEditor {
         Image::from_rgba8(self.state.borrow_mut().render())
     }
 
+    /// Render the current editor contents and return the raw RGBA bytes.
+    #[doc(hidden)]
+    pub fn surface_rgba(&mut self) -> Vec<u8> {
+        self.state.borrow_mut().render().as_bytes().to_vec()
+    }
+
     /// Return the editor's current plain-text contents (line-separated).
     pub fn text(&self) -> String {
         self.state.borrow().plain_text()

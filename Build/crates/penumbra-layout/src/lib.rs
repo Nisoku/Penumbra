@@ -1,6 +1,8 @@
+mod collision;
+mod config;
 mod cpu;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use penumbra_core::link::Link;
 use penumbra_core::note::NoteId;
@@ -9,65 +11,8 @@ use vibe_graph_layout_gpu::{
     Edge as VibeEdge, GpuLayout, LayoutConfig as GpuConfig, Position as VibePos,
 };
 
-use cpu::{CpuForceLayout, SpatialHash};
-
-/// Configuration for the GPU-accelerated layout engine.
-#[derive(Debug, Clone)]
-pub struct LayoutConfig {
-    pub dt: f32,
-    pub damping: f32,
-    pub repulsion: f32,
-    pub attraction: f32,
-    pub theta: f32,
-    pub gravity: f32,
-    pub ideal_length: f32,
-    pub max_iterations: usize,
-    pub convergence_threshold: f64,
-    /// Minimum gap between node bounding boxes after collision avoidance.
-    pub collision_margin: f64,
-    /// Maximum displacement per collision resolution pass (pixels).
-    pub max_collision_push: f64,
-    /// Number of iterative passes for collision resolution.
-    pub collision_passes: usize,
-    /// Geographic radius (pixels) of a neighborhood for `step_neighborhood`.
-    pub neighborhood_radius: f64,
-}
-
-impl Default for LayoutConfig {
-    fn default() -> Self {
-        Self {
-            dt: 0.016,
-            damping: 0.9,
-            repulsion: 1000.0,
-            attraction: 0.01,
-            theta: 0.8,
-            gravity: 0.1,
-            ideal_length: 50.0,
-            max_iterations: 200,
-            convergence_threshold: 0.1,
-            collision_margin: 10.0,
-            max_collision_push: 20.0,
-            collision_passes: 5,
-            neighborhood_radius: 400.0,
-        }
-    }
-}
-
-impl From<&LayoutConfig> for GpuConfig {
-    fn from(c: &LayoutConfig) -> Self {
-        Self {
-            dt: c.dt,
-            damping: c.damping,
-            repulsion: c.repulsion,
-            attraction: c.attraction,
-            theta: c.theta,
-            gravity: c.gravity,
-            ideal_length: c.ideal_length,
-            use_barnes_hut: true,
-            max_tree_depth: 12,
-        }
-    }
-}
+pub use config::LayoutConfig;
+use cpu::CpuForceLayout;
 
 /// GPU-accelerated force-directed graph layout engine.
 ///
@@ -124,8 +69,13 @@ impl LayoutEngine {
         self.nodes.push(id);
         self.index_map.insert(id, idx);
 
-        let pos = Self::random_position();
+        let pos = Self::seed_position(idx as usize);
         self.positions.push(VibePos::new(pos.x, pos.y));
+
+        // Assign the default card-sized box so collision avoidance keeps this
+        // node from overlapping others until the UI supplies a measured box.
+        let (w, h) = self.config.default_node_bounds;
+        self.node_bounds.insert(id, Bounds::new(w, h));
 
         if pinned {
             self.pinned.insert(id, VibePos::new(pos.x, pos.y));
@@ -197,6 +147,11 @@ impl LayoutEngine {
     /// Get the bounding box for a node, if one was set.
     pub fn get_bounds(&self, id: &NoteId) -> Option<Bounds> {
         self.node_bounds.get(id).copied()
+    }
+
+    /// Drop a node's bounding box so it is excluded from collision avoidance.
+    pub fn clear_node_bounds(&mut self, id: &NoteId) {
+        self.node_bounds.remove(id);
     }
 
     pub fn pin(&mut self, id: &NoteId, pinned: bool) {
@@ -305,6 +260,15 @@ impl LayoutEngine {
         // Runs even without edges (nodes can overlap at initial positions).
         if !self.node_bounds.is_empty() {
             self.resolve_collisions();
+
+            if let Some(ref mut cpu) = self.cpu {
+                let synced: Vec<Position> = self
+                    .positions
+                    .iter()
+                    .map(|p| Position::new(p.x as f64, p.y as f64))
+                    .collect();
+                cpu.set_positions(&synced);
+            }
         }
 
         // Calculate average displacement for non-pinned nodes.
@@ -443,257 +407,59 @@ impl LayoutEngine {
         }
     }
 
-    /// Push apart overlapping node bounding boxes.
-    ///
-    /// Runs several iterative passes. In each pass, every pair of overlapping
-    /// nodes is pushed apart along the center-to-center vector, clamped to
-    /// `max_collision_push` per pass. The margin controls how much extra
-    /// separation to maintain beyond bare overlap.
-    fn resolve_collisions(&mut self) {
-        let margin = self.config.collision_margin;
-        let max_push = self.config.max_collision_push;
-        let passes = self.config.collision_passes;
+    /// The node ids currently pinned, for collision passes that must leave
+    /// pinned nodes fixed.
+    fn pinned_ids(&self) -> HashSet<NoteId> {
+        self.pinned.keys().copied().collect()
+    }
 
-        // Work in f64 to avoid precision issues with many small pushes.
-        let mut pos_f64: Vec<Position> = self
-            .positions
+    /// Positions converted to the f64 domain the collision solver works in.
+    fn positions_f64(&self) -> Vec<Position> {
+        self.positions
             .iter()
             .map(|p| Position::new(p.x as f64, p.y as f64))
-            .collect();
+            .collect()
+    }
 
-        // The search radius must span the widest possible overlapping pair:
-        // two nodes at their max half-diagonal separation, plus the margin.
-        let mut max_half_diag = 0.0f64;
-        for bounds in self.node_bounds.values() {
-            let half_diag =
-                (bounds.width * bounds.width + bounds.height * bounds.height).sqrt() * 0.5;
-            max_half_diag = max_half_diag.max(half_diag);
-        }
-        let search_radius = max_half_diag * 2.0 + margin;
-
-        for _pass in 0..passes {
-            let mut any_resolved = false;
-            // Rebuild the index each pass so recently pushed nodes are found
-            // in their new cells on the next iteration.
-            let hash = SpatialHash::new(search_radius, pos_f64.clone());
-
-            for i in 0..self.nodes.len() {
-                if self.pinned.contains_key(&self.nodes[i]) {
-                    continue;
-                }
-                let Some(bounds_i) = self.node_bounds.get(&self.nodes[i]) else {
-                    continue;
-                };
-                let a = pos_f64[i];
-                let center_a =
-                    Position::new(a.x + bounds_i.width * 0.5, a.y + bounds_i.height * 0.5);
-
-                for j in hash.within(center_a, search_radius) {
-                    if j <= i {
-                        continue;
-                    }
-                    if self.pinned.contains_key(&self.nodes[j]) {
-                        continue;
-                    }
-                    let Some(bounds_j) = self.node_bounds.get(&self.nodes[j]) else {
-                        continue;
-                    };
-
-                    let b = pos_f64[j];
-
-                    if !bounds_i.overlaps(&a, bounds_j, &b) {
-                        continue;
-                    }
-
-                    // Compute separation direction (center to center).
-                    let ca_x = a.x + bounds_i.width * 0.5;
-                    let ca_y = a.y + bounds_i.height * 0.5;
-                    let cb_x = b.x + bounds_j.width * 0.5;
-                    let cb_y = b.y + bounds_j.height * 0.5;
-
-                    let dx = cb_x - ca_x;
-                    let dy = cb_y - ca_y;
-                    let dist = (dx * dx + dy * dy).sqrt();
-
-                    let (nx, ny) = if dist < 1e-6 {
-                        // Coincident centers: fall back to a deterministic
-                        // direction derived from the node indices.
-                        let angle = (i * 2654435761 + j * 2246822519) as f64;
-                        (angle.cos(), angle.sin())
-                    } else {
-                        (dx / dist, dy / dist)
-                    };
-
-                    // Target separation distance: half-diagonal sum + margin.
-                    let half_diag_i = (bounds_i.width * bounds_i.width
-                        + bounds_i.height * bounds_i.height)
-                        .sqrt()
-                        * 0.5;
-                    let half_diag_j = (bounds_j.width * bounds_j.width
-                        + bounds_j.height * bounds_j.height)
-                        .sqrt()
-                        * 0.5;
-                    let target = half_diag_i + half_diag_j + margin;
-
-                    if dist >= target {
-                        continue;
-                    }
-
-                    let push = ((target - dist) * 0.5).min(max_push);
-
-                    pos_f64[i].x -= nx * push;
-                    pos_f64[i].y -= ny * push;
-                    pos_f64[j].x += nx * push;
-                    pos_f64[j].y += ny * push;
-
-                    any_resolved = true;
-                }
-            }
-
-            if !any_resolved {
-                break;
-            }
-        }
-
-        // Write back to the GPU positions.
-        for (i, p) in pos_f64.iter().enumerate() {
+    /// Push apart overlapping node bounding boxes across the whole graph. See
+    /// [`collision::resolve_all`] for the per-pass mechanics.
+    fn resolve_collisions(&mut self) {
+        let pinned = self.pinned_ids();
+        let field = collision::CollisionField {
+            nodes: &self.nodes,
+            node_bounds: &self.node_bounds,
+            pinned: &pinned,
+            config: &self.config,
+        };
+        let resolved = collision::resolve_all(&field, &self.positions_f64());
+        for (i, p) in resolved.iter().enumerate() {
             self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
         }
     }
 
-    /// Push apart overlapping bounding boxes among nodes near a center.
+    /// Push apart overlapping bounding boxes among nodes near a center. See
+    /// [`collision::resolve_neighborhood`] for the anchor-ring behavior.
     fn resolve_collisions_neighborhood(&mut self, center: usize, radius: f64) {
-        let margin = self.config.collision_margin;
-        let max_push = self.config.max_collision_push;
-        let passes = self.config.collision_passes;
-
-        let mut max_half_diag = 0.0f64;
-        for bounds in self.node_bounds.values() {
-            let half_diag =
-                (bounds.width * bounds.width + bounds.height * bounds.height).sqrt() * 0.5;
-            max_half_diag = max_half_diag.max(half_diag);
-        }
-        let search_radius = max_half_diag * 2.0 + margin;
-
-        // The spatial hash cell covers the search radius around the center so
-        // the neighborhood query includes the anchor ring of overlapping nodes.
-        let mut pos_f64: Vec<Position> = self
-            .positions
-            .iter()
-            .map(|p| Position::new(p.x as f64, p.y as f64))
-            .collect();
-        let center_pos = pos_f64[center];
-        let initial_hash = SpatialHash::new(search_radius, pos_f64.clone());
-        let neighborhood: std::collections::HashSet<usize> = initial_hash
-            .within(center_pos, radius + search_radius)
-            .into_iter()
-            .collect();
-
-        for _pass in 0..passes {
-            let mut any_resolved = false;
-            let hash = SpatialHash::new(search_radius, pos_f64.clone());
-            let mut neighbors: Vec<usize> = hash.within(center_pos, radius + search_radius);
-            neighbors.sort_unstable();
-            neighbors.dedup();
-
-            for &i in &neighbors {
-                if !neighborhood.contains(&i) {
-                    continue;
-                }
-                if self.pinned.contains_key(&self.nodes[i]) {
-                    continue;
-                }
-                let Some(bounds_i) = self.node_bounds.get(&self.nodes[i]) else {
-                    continue;
-                };
-                let a = pos_f64[i];
-                let center_a =
-                    Position::new(a.x + bounds_i.width * 0.5, a.y + bounds_i.height * 0.5);
-
-                for j in hash.within(center_a, search_radius) {
-                    if j <= i {
-                        continue;
-                    }
-                    if self.pinned.contains_key(&self.nodes[j]) {
-                        continue;
-                    }
-                    let Some(bounds_j) = self.node_bounds.get(&self.nodes[j]) else {
-                        continue;
-                    };
-                    let b = pos_f64[j];
-
-                    if !bounds_i.overlaps(&a, bounds_j, &b) {
-                        continue;
-                    }
-
-                    let ca_x = a.x + bounds_i.width * 0.5;
-                    let ca_y = a.y + bounds_i.height * 0.5;
-                    let cb_x = b.x + bounds_j.width * 0.5;
-                    let cb_y = b.y + bounds_j.height * 0.5;
-
-                    let dx = cb_x - ca_x;
-                    let dy = cb_y - ca_y;
-                    let dist = (dx * dx + dy * dy).sqrt();
-
-                    let (nx, ny) = if dist < 1e-6 {
-                        let angle = (i * 2654435761 + j * 2246822519) as f64;
-                        (angle.cos(), angle.sin())
-                    } else {
-                        (dx / dist, dy / dist)
-                    };
-
-                    let half_diag_i = (bounds_i.width * bounds_i.width
-                        + bounds_i.height * bounds_i.height)
-                        .sqrt()
-                        * 0.5;
-                    let half_diag_j = (bounds_j.width * bounds_j.width
-                        + bounds_j.height * bounds_j.height)
-                        .sqrt()
-                        * 0.5;
-                    let target = half_diag_i + half_diag_j + margin;
-
-                    if dist >= target {
-                        continue;
-                    }
-
-                    let push = ((target - dist) * 0.5).min(max_push);
-
-                    if neighborhood.contains(&j) {
-                        pos_f64[i].x -= nx * push;
-                        pos_f64[i].y -= ny * push;
-                        pos_f64[j].x += nx * push;
-                        pos_f64[j].y += ny * push;
-                    } else {
-                        // j is an anchor outside the neighborhood; only i moves.
-                        pos_f64[i].x -= nx * push * 2.0;
-                        pos_f64[i].y -= ny * push * 2.0;
-                    }
-
-                    any_resolved = true;
-                }
-            }
-
-            if !any_resolved {
-                break;
-            }
-        }
-
-        for (i, p) in pos_f64.iter().enumerate() {
-            if neighborhood.contains(&i) {
-                self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
-            }
+        let pinned = self.pinned_ids();
+        let field = collision::CollisionField {
+            nodes: &self.nodes,
+            node_bounds: &self.node_bounds,
+            pinned: &pinned,
+            config: &self.config,
+        };
+        let resolved = collision::resolve_neighborhood(&field, &self.positions_f64(), center, radius);
+        for (i, p) in resolved.iter().enumerate() {
+            self.positions[i] = VibePos::new(p.x as f32, p.y as f32);
         }
     }
 
-    fn random_position() -> VibePos {
-        use web_time::{SystemTime, UNIX_EPOCH};
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-        let seed = nanos as f64;
-        let angle = seed * std::f64::consts::TAU / 1_000_000_000.0;
-        let radius = 50.0 + (seed % 200.0);
+    fn seed_position(index: usize) -> VibePos {
+        // 137.5 degrees in radians: the golden angle HEHEHEE
+        const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653;
+        const SPREAD: f64 = 140.0;
+        let n = index as f64;
+        let angle = n * GOLDEN_ANGLE;
+        let radius = SPREAD * (n + 0.5).sqrt();
         VibePos::new((angle.cos() * radius) as f32, (angle.sin() * radius) as f32)
     }
 }

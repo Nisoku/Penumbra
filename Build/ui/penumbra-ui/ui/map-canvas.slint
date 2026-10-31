@@ -11,6 +11,7 @@ export component MapCanvas inherits Rectangle {
     in property <string> grid-path: "";
     in property <string> edge-path: "";
     in property <string> selected-edge-path: "";
+    in property <string> pending-link-path: "";
     in-out property <length> camera-x: 0px;
     in-out property <length> camera-y: 0px;
     in-out property <float> zoom: 1;
@@ -21,6 +22,9 @@ export component MapCanvas inherits Rectangle {
     callback note-released(int, length, length);
     callback note-pinned(int, length, length);
     callback note-unpinned(int);
+    callback link-start(int);
+    callback link-move(int, length, length);
+    callback link-end(int, length, length);
     callback open-note(int);
 
     canvas := CanvasSurface {
@@ -29,6 +33,7 @@ export component MapCanvas inherits Rectangle {
         base-path: root.grid-path;
         mid-path: root.edge-path;
         top-path: root.selected-edge-path;
+        overlay-path: root.pending-link-path;
         camera-x: root.camera-x;
         camera-y: root.camera-y;
         zoom: root.zoom;
@@ -61,6 +66,9 @@ export component MapCanvas inherits Rectangle {
         note-released(id, wx, wy) => { root.note-released(id, wx, wy); }
         note-pinned(id, wx, wy) => { root.note-pinned(id, wx, wy); }
         note-unpinned(id) => { root.note-unpinned(id); }
+        link-start(id) => { root.link-start(id); }
+        link-move(id, wx, wy) => { root.link-move(id, wx, wy); }
+        link-end(id, wx, wy) => { root.link-end(id, wx, wy); }
         activated(id) => { root.open-note(id); }
     }
 

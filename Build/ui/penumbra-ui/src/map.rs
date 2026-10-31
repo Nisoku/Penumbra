@@ -2,7 +2,8 @@ use crate::NoteCardVM;
 
 pub const GRID_SPACING: f32 = 120.0;
 pub const CARD_READING_ZOOM: f32 = 1.8;
-const CARD_W: f32 = 180.0;
+pub const CARD_W: f32 = 180.0;
+pub const CARD_H: f32 = 120.0;
 const MAX_ZOOM: f32 = 8.0;
 const VIEWPORT_MARGIN: f32 = 40.0;
 const CURVE_BEND: f32 = 0.18;
@@ -70,6 +71,32 @@ pub fn build_edges(
         base,
         selected: selected_path,
     }
+}
+
+/// Screen-space path for an in-progress manual link
+pub fn build_pending_link(
+    source_x: f32,
+    source_y: f32,
+    pointer_wx: f32,
+    pointer_wy: f32,
+    cam: MapCamera,
+) -> String {
+    let sx = (source_x + CARD_W * 0.5 - cam.x) * cam.zoom;
+    let sy = (source_y + CARD_H * 0.5 - cam.y) * cam.zoom;
+    let px = (pointer_wx - cam.x) * cam.zoom;
+    let py = (pointer_wy - cam.y) * cam.zoom;
+    format!("M {sx:.1} {sy:.1} L {px:.1} {py:.1} ")
+}
+
+/// Which card (by id) contains the given world point, if any. Cards are matched
+/// against their fixed on-screen footprint anchored at `(card.x, card.y)`.
+pub fn card_at_world(cards: &[NoteCardVM], wx: f32, wy: f32) -> Option<i32> {
+    cards
+        .iter()
+        .find(|card| {
+            wx >= card.x && wx <= card.x + CARD_W && wy >= card.y && wy <= card.y + CARD_H
+        })
+        .map(|card| card.id)
 }
 
 /// The camera that frames a single card at reading zoom.
