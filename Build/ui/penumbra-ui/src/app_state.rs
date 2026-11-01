@@ -178,7 +178,6 @@ pub(crate) fn build_note_cards(
                 .collect::<String>()
                 .as_str()
                 .into(),
-            tags: note.tags.join(", ").as_str().into(),
             pinned: pinned.contains(&note.id) || note.meta.pinned,
             x: pos.x as f32,
             y: pos.y as f32,

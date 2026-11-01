@@ -6,7 +6,6 @@ fn card(id: i32, x: f32, y: f32) -> NoteCardVM {
         id,
         title: format!("note {id}").into(),
         preview: String::new().into(),
-        tags: String::new().into(),
         pinned: false,
         x,
         y,
