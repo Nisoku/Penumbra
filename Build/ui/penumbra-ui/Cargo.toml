@@ -29,6 +29,7 @@ penumbra-layout = { path = "../../crates/penumbra-layout" }
 penumbra-graph = { path = "../../crates/penumbra-graph" }
 penumbra-auto-link = { path = "../../crates/penumbra-auto-link" }
 penumbra-index = { path = "../../crates/penumbra-index" }
+penumbra-search = { path = "../../crates/penumbra-search" }
 cosmic-text = "0.19"
 png = "0.18"
 

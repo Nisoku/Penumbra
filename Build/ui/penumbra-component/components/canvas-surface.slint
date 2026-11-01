@@ -28,8 +28,10 @@ export component CanvasSurface inherits Rectangle {
     base := Path {
         x: 0px;
         y: 0px;
-        width: 0px;
-        height: 0px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: self.width / 1px;
+        viewbox-height: self.height / 1px;
         commands: root.base-path;
         stroke: Theme.hairline;
         stroke-width: 1px;
@@ -39,8 +41,10 @@ export component CanvasSurface inherits Rectangle {
     mid := Path {
         x: 0px;
         y: 0px;
-        width: 0px;
-        height: 0px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: self.width / 1px;
+        viewbox-height: self.height / 1px;
         commands: root.mid-path;
         stroke: Theme.edge;
         stroke-width: 1px;
@@ -50,8 +54,10 @@ export component CanvasSurface inherits Rectangle {
     top := Path {
         x: 0px;
         y: 0px;
-        width: 0px;
-        height: 0px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: self.width / 1px;
+        viewbox-height: self.height / 1px;
         commands: root.top-path;
         stroke: Theme.edge-selected;
         stroke-width: 1.5px;
@@ -61,8 +67,10 @@ export component CanvasSurface inherits Rectangle {
     overlay := Path {
         x: 0px;
         y: 0px;
-        width: 0px;
-        height: 0px;
+        viewbox-x: 0;
+        viewbox-y: 0;
+        viewbox-width: self.width / 1px;
+        viewbox-height: self.height / 1px;
         commands: root.overlay-path;
         stroke: Theme.accent;
         stroke-width: 2px;

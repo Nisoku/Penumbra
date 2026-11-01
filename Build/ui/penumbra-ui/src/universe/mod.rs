@@ -1,6 +1,7 @@
 mod camera;
 mod linking;
 mod physics;
+mod search;
 
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
@@ -11,12 +12,13 @@ use crate::app_state::{
     apply_card_visual_model, set_status, PendingLink, SharedState, UI_CARDS_MODEL,
 };
 use crate::map::{self, MapCamera};
-use crate::{platform, AppWindow, NoteCardVM};
+use crate::{platform, AppWindow, NoteCardVM, TagVM};
 
 pub(crate) use camera::{
     cancel_camera_glide, center_camera_on_cards, start_camera_glide, start_glide, viewport_size,
 };
 pub(crate) use physics::{publish_drift, start_ambient_settle};
+pub(crate) use search::wire_search;
 
 use linking::{create_manual_link, pin_note, settle_note, unpin_note};
 use physics::cancel_ambient_settle;
@@ -195,6 +197,7 @@ pub(crate) fn publish_visuals(
     state: &SharedState,
     ui: &AppWindow,
     cards: Vec<NoteCardVM>,
+    tags: Vec<Vec<TagVM>>,
     links: Vec<(i32, i32)>,
 ) {
     let model = Rc::new(slint::VecModel::from(cards.clone()));
@@ -204,7 +207,16 @@ pub(crate) fn publish_visuals(
     UI_CARDS_MODEL.with(|cell| {
         *cell.borrow_mut() = Some(Rc::clone(&model));
     });
+    set_note_tags(ui, tags);
     rebuild_paths(state, ui);
+}
+
+pub(crate) fn set_note_tags(ui: &AppWindow, tags: Vec<Vec<TagVM>>) {
+    let rows: Vec<slint::ModelRc<TagVM>> = tags
+        .into_iter()
+        .map(|row| slint::ModelRc::new(Rc::new(slint::VecModel::from(row))))
+        .collect();
+    ui.set_note_tags(slint::ModelRc::new(Rc::new(slint::VecModel::from(rows))));
 }
 
 /// Update one card's position in the shared state and the live Slint model.

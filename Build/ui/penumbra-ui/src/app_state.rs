@@ -10,12 +10,14 @@ use crate::map::MapCamera;
 use crate::platform::Instant;
 use crate::rich_editor::RichEditor;
 use crate::NoteCardVM;
+use crate::TagVM;
 use futures::lock::Mutex as AsyncMutex;
 use penumbra_app::Universe;
 use penumbra_auto_link::AutoLinker;
 use penumbra_core::note::NoteId;
 use penumbra_core::position::Position;
 use penumbra_core::EmbeddingProvider;
+use penumbra_index::VectorIndex;
 use penumbra_layout::LayoutEngine;
 use slint::Model;
 
@@ -80,6 +82,7 @@ pub(crate) struct SharedState {
     pub(crate) editor_prev_camera: Mutex<Option<MapCamera>>,
     pub(crate) editor_reveal: AtomicBool,
     pub(crate) embedder: Mutex<Option<Arc<dyn EmbeddingProvider>>>,
+    pub(crate) index: Mutex<Option<Arc<Mutex<dyn VectorIndex>>>>,
     pub(crate) linker: Mutex<Option<Arc<AutoLinker>>>,
     /// True while the ambient-settle loop is running, so only one is ever
     /// armed at a time; a fresh request just extends the running loop.
@@ -131,38 +134,58 @@ pub(crate) fn note_code(id: &NoteId) -> i32 {
     id.as_uuid().as_u128() as i32
 }
 
+/// phase-hue index (0..7) for a tag so the same tag always gets the same
+/// dot color
+fn tag_hue(tag: &str) -> i32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in tag.bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    (hash % 7) as i32
+}
+
 /// Build the UI card view-models from the current layout and graph, marking
 /// each card pinned if its note id is in `pinned`.
 pub(crate) fn build_note_cards(
     layout: &LayoutEngine,
     graph: &penumbra_graph::GraphStore,
     pinned: &HashSet<NoteId>,
-) -> Vec<NoteCardVM> {
+) -> (Vec<NoteCardVM>, Vec<Vec<TagVM>>) {
     let positions = layout.all_positions();
-    graph
-        .all_notes()
-        .map(|note| {
-            let pos = positions
-                .get(&note.id)
-                .copied()
-                .unwrap_or(Position::new(0.0, 0.0));
-            NoteCardVM {
-                id: note_code(&note.id),
-                title: note.title.as_str().into(),
-                preview: note
-                    .body
-                    .chars()
-                    .take(80)
-                    .collect::<String>()
-                    .as_str()
-                    .into(),
-                tags: note.tags.join(", ").as_str().into(),
-                pinned: pinned.contains(&note.id),
-                x: pos.x as f32,
-                y: pos.y as f32,
-            }
-        })
-        .collect()
+    let mut cards = Vec::new();
+    let mut tags = Vec::new();
+    for note in graph.all_notes() {
+        let pos = positions
+            .get(&note.id)
+            .copied()
+            .unwrap_or(Position::new(0.0, 0.0));
+        let tag_list: Vec<TagVM> = note
+            .tags
+            .iter()
+            .map(|tag| TagVM {
+                label: tag.as_str().into(),
+                hue: tag_hue(tag),
+            })
+            .collect();
+        cards.push(NoteCardVM {
+            id: note_code(&note.id),
+            title: note.title.as_str().into(),
+            preview: note
+                .body
+                .chars()
+                .take(160)
+                .collect::<String>()
+                .as_str()
+                .into(),
+            tags: note.tags.join(", ").as_str().into(),
+            pinned: pinned.contains(&note.id) || note.meta.pinned,
+            x: pos.x as f32,
+            y: pos.y as f32,
+        });
+        tags.push(tag_list);
+    }
+    (cards, tags)
 }
 
 /// Push one updated card row into the live Slint model by index

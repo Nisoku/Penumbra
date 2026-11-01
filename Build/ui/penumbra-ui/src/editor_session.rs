@@ -246,7 +246,7 @@ async fn run_pipeline(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, note
 
         let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
         let pinned_ids = pinned_note_ids(universe, &pin_codes);
-        let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
+        let (cards, tags) = build_note_cards(layout, &universe.graph(), &pinned_ids);
         let links: Vec<(i32, i32)> = graph_links
             .iter()
             .map(|link| (note_code(&link.source), note_code(&link.target)))
@@ -260,7 +260,7 @@ async fn run_pipeline(state: &Rc<SharedState>, ui: &slint::Weak<AppWindow>, note
         drop(layout_guard);
 
         if let Some(ui) = ui.upgrade() {
-            publish_visuals(state, &ui, cards, links);
+            publish_visuals(state, &ui, cards, tags, links);
             if links_changed {
                 // New edges reshape the whole constellation
                 start_ambient_settle(state, &ui);

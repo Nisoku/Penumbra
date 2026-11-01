@@ -23,8 +23,8 @@ fn edge_path_uses_screen_coordinates_and_culls_offscreen() {
         zoom: 1.0,
     };
     let edges = map::build_edges(&cards, &links, cam, 800.0, 600.0, -1);
-    assert!(edges.base.contains("M 0.0 0.0 C"));
-    assert!(edges.base.contains("200.0 0.0 "));
+    assert!(edges.base.contains("M 90.0 60.0 C"));
+    assert!(edges.base.contains("290.0 60.0 "));
     assert!(edges.selected.is_empty());
 
     let far = vec![card(1, 5000.0, 5000.0), card(2, 5200.0, 5000.0)];
@@ -42,10 +42,10 @@ fn edge_path_highlights_only_selected_neighbourhood() {
         zoom: 1.0,
     };
     let edges = map::build_edges(&cards, &links, cam, 800.0, 600.0, 2);
-    assert!(edges.selected.contains("200.0 0.0 "));
-    assert!(edges.base.contains("400.0 0.0 "));
-    assert!(!edges.base.contains("200.0 0.0 "));
-    assert!(edges.selected.contains("0.0 0.0 "));
+    assert!(edges.selected.contains("290.0 60.0 "));
+    assert!(edges.base.contains("490.0 60.0 "));
+    assert!(!edges.base.contains("290.0 60.0 "));
+    assert!(edges.selected.contains("90.0 60.0 "));
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn edge_path_skips_links_without_cards() {
         zoom: 1.0,
     };
     let edges = map::build_edges(&cards, &links, cam, 800.0, 600.0, -1);
-    assert!(edges.base.contains("M 0.0 0.0 C"));
+    assert!(edges.base.contains("M 90.0 60.0 C"));
     assert_eq!(edges.base.matches("M ").count(), 1);
 }
 
@@ -72,7 +72,7 @@ fn edge_curve_bend_is_clamped() {
         zoom: 1.0,
     };
     let edges = map::build_edges(&cards, &links, cam, 800.0, 600.0, -1);
-    assert!(edges.base.contains("M 0.0 0.0 C 1.0"));
+    assert!(edges.base.contains("M 90.0 60.0 C 91.0"));
 }
 
 #[test]

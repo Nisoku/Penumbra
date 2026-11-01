@@ -33,7 +33,7 @@ pub fn build_edges(
 ) -> MapEdges {
     let positions: std::collections::HashMap<i32, (f32, f32)> = cards
         .iter()
-        .map(|card| (card.id, (card.x, card.y)))
+        .map(|card| (card.id, (card.x + CARD_W * 0.5, card.y + CARD_H * 0.5)))
         .collect();
 
     let mut base = String::new();

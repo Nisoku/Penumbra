@@ -127,7 +127,7 @@ async fn publish_after_link(
     handle: &slint::Weak<AppWindow>,
     note_id: penumbra_core::note::NoteId,
 ) {
-    let (cards, links) = {
+    let (cards, tags, links) = {
         let mut layout_guard = state.layout.lock().await;
         let mut universe_guard = state.universe.lock().await;
         let (Some(layout), Some(universe)) = (layout_guard.as_mut(), universe_guard.as_mut())
@@ -149,16 +149,16 @@ async fn publish_after_link(
 
         let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
         let pinned_ids = pinned_note_ids(universe, &pin_codes);
-        let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
+        let (cards, tags) = build_note_cards(layout, &universe.graph(), &pinned_ids);
         let links: Vec<(i32, i32)> = graph_links
             .iter()
             .map(|link| (note_code(&link.source), note_code(&link.target)))
             .collect();
-        (cards, links)
+        (cards, tags, links)
     };
 
     if let Some(ui) = handle.upgrade() {
-        publish_visuals(state, &ui, cards, links);
+        publish_visuals(state, &ui, cards, tags, links);
         set_status(&ui.as_weak(), "linked");
         start_ambient_settle(state, &ui);
     }

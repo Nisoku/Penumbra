@@ -4757,6 +4757,7 @@ dependencies = [
  "penumbra-index",
  "penumbra-layout",
  "penumbra-markdown",
+ "penumbra-search",
  "penumbra-storage",
  "png",
  "rfd",

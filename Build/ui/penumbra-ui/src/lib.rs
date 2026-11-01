@@ -21,7 +21,7 @@ use crate::editor_session::{prepare_editor_session, wire_editor};
 use crate::map::MapCamera;
 use crate::universe::{
     cancel_camera_glide, center_camera_on_cards, publish_visuals, rebuild_paths,
-    start_ambient_settle, start_glide, viewport_size, wire_map,
+    start_ambient_settle, start_glide, viewport_size, wire_map, wire_search,
 };
 use penumbra_app::Universe;
 use penumbra_auto_link::AutoLinker;
@@ -61,6 +61,7 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
         editor_prev_camera: Mutex::new(None),
         editor_reveal: std::sync::atomic::AtomicBool::new(false),
         embedder: Mutex::new(None),
+        index: Mutex::new(None),
         linker: Mutex::new(None),
         settling: std::sync::atomic::AtomicBool::new(false),
         pending_link: Mutex::new(None),
@@ -71,6 +72,7 @@ fn start_app() -> std::result::Result<(), Box<dyn std::error::Error>> {
     wire_editor(&ui, &state);
     wire_open_note(&ui, &state);
     wire_map(&ui, &state);
+    wire_search(&ui, &state);
 
     // `_persist_timer` lives to the end of this scope, keeping the timer armed
     // for the whole loop; dropping it after the loop exits unregisters it.
@@ -199,7 +201,8 @@ async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
                 graph_handle,
                 events,
             );
-            *state.embedder.lock().unwrap() = Some(embedder);
+            *state.embedder.lock().unwrap() = Some(Arc::clone(&embedder));
+            *state.index.lock().unwrap() = Some(Arc::clone(&index));
             *state.linker.lock().unwrap() = Some(Arc::new(linker));
 
             {
@@ -212,7 +215,7 @@ async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
                 }
             }
 
-            let cards = build_note_cards(&layout, &universe.graph(), &saved_pins);
+            let (cards, tags) = build_note_cards(&layout, &universe.graph(), &saved_pins);
             let links: Vec<(i32, i32)> = graph_links
                 .iter()
                 .map(|link| (note_code(&link.source), note_code(&link.target)))
@@ -224,7 +227,7 @@ async fn run_boot(state: Rc<SharedState>, boot_ui: slint::Weak<AppWindow>) {
             if let Some(ui) = boot_ui.upgrade() {
                 ui.set_ready(true);
                 ui.set_status(format!("universe ready - {} notes", count).into());
-                publish_visuals(&boot_state, &ui, cards, links);
+                publish_visuals(&boot_state, &ui, cards, tags, links);
                 center_camera_on_cards(&boot_state, &ui);
                 rebuild_paths(&boot_state, &ui);
                 start_ambient_settle(&boot_state, &ui);
@@ -356,7 +359,7 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
                 layout.step();
                 let pin_codes = state.pins.lock().unwrap().keys().copied().collect();
                 let pinned_ids = pinned_note_ids(universe, &pin_codes);
-                let cards = build_note_cards(layout, &universe.graph(), &pinned_ids);
+                let (cards, tags) = build_note_cards(layout, &universe.graph(), &pinned_ids);
                 let links: Vec<(i32, i32)> = graph_links
                     .iter()
                     .map(|link| (note_code(&link.source), note_code(&link.target)))
@@ -365,7 +368,7 @@ async fn new_note_task(state: Rc<SharedState>, ui: slint::Weak<AppWindow>) {
                 drop(layout_guard);
                 if let Some(ui) = ui.upgrade() {
                     ui.set_status(format!("universe ready - {} notes", count).into());
-                    publish_visuals(&state, &ui, cards, links);
+                    publish_visuals(&state, &ui, cards, tags, links);
                     // A new node lands at a random spot
                     start_ambient_settle(&state, &ui);
                 }

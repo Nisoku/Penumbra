@@ -1,5 +1,5 @@
 import { Theme, CanvasSurface } from "@penumbra-component/index.slint";
-import { NoteCardVM } from "data.slint";
+import { NoteCardVM, TagVM } from "data.slint";
 import { NoteCard } from "note-card.slint";
 
 export component MapCanvas inherits Rectangle {
@@ -8,6 +8,7 @@ export component MapCanvas inherits Rectangle {
 
     in property <string> status: "";
     in property <[NoteCardVM]> note-cards: [];
+    in property <[[TagVM]]> note-tags: [];
     in property <string> grid-path: "";
     in property <string> edge-path: "";
     in property <string> selected-edge-path: "";
@@ -51,7 +52,7 @@ export component MapCanvas inherits Rectangle {
         }
     }
 
-    for card in root.note-cards: NoteCard {
+    for card[i] in root.note-cards: NoteCard {
         visible: (card.x - root.camera-x) * root.zoom > -220px
             && (card.x - root.camera-x) * root.zoom < root.width + 220px
             && (card.y - root.camera-y) * root.zoom > -220px
@@ -59,6 +60,7 @@ export component MapCanvas inherits Rectangle {
         x: (card.x - root.camera-x) * root.zoom;
         y: (card.y - root.camera-y) * root.zoom;
         card: card;
+        tags: root.note-tags[i];
         zoom: root.zoom;
         selected: root.selected-note == card.id;
         note-selected(id) => { root.note-selected(id); }

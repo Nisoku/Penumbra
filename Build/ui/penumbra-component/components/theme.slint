@@ -23,4 +23,17 @@ export global Theme {
     out property<length> radius-small: 6px;
     out property<length> radius-medium: 8px;
     out property<length> radius-pill: 23px;
+    out property<[color]> phase-hues: [
+        #5B7DB1,
+        #4E9A8E,
+        #7FA65A,
+        #C9A227,
+        #C97B4A,
+        #A66A9C,
+        #8878B8,
+    ];
+
+    pure public function phase-hue(index: int) -> color {
+        return root.phase-hues[Math.mod(index, 7)];
+    }
 }

@@ -1,10 +1,11 @@
 import { Theme } from "@penumbra-component/index.slint";
-import { NoteCardVM } from "data.slint";
+import { NoteCardVM, TagVM } from "data.slint";
 
 export component NoteCard inherits Rectangle {
     in property <NoteCardVM> card;
     in property <float> zoom: 1;
     in property <bool> selected: false;
+    in property <[TagVM]> tags;
 
     callback activated(int);
     callback note-selected(int);
@@ -30,16 +31,34 @@ export component NoteCard inherits Rectangle {
     height: 120px;
     clip: true;
     border-radius: 14px;
-    border-width: 1px;
+    border-width: root.selected ? 2px : 1px;
     border-color: root.selected ? Theme.accent : Theme.hairline;
+    animate border-width {
+        duration: 120ms;
+        easing: ease-out;
+    }
     drop-shadow-offset-x: 0px;
-    drop-shadow-offset-y: 2px;
-    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: root.selected ? 4px : 2px;
+    drop-shadow-blur: root.selected ? 24px : 16px;
     drop-shadow-color: Theme.card-shadow;
+    animate drop-shadow-offset-y {
+        duration: 120ms;
+        easing: ease-out;
+    }
+    animate drop-shadow-blur {
+        duration: 120ms;
+        easing: ease-out;
+    }
     transform-scale-x: root.dragging || root.right-dragging ? 103% : 100%;
     transform-scale-y: root.dragging || root.right-dragging ? 103% : 100%;
-    animate transform-scale-x { duration: 600ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
-    animate transform-scale-y { duration: 600ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+    animate transform-scale-x {
+        duration: 600ms;
+        easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    animate transform-scale-y {
+        duration: 600ms;
+        easing: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
 
     base := Rectangle {
         border-radius: 14px;
@@ -50,7 +69,10 @@ export component NoteCard inherits Rectangle {
         border-radius: 14px;
         background: Theme.card-glass;
         opacity: root.dragging || root.right-dragging ? 0.86 : 1.0;
-        animate opacity { duration: 120ms; easing: ease-out; }
+        animate opacity {
+            duration: 120ms;
+            easing: ease-out;
+        }
     }
 
     Rectangle {
@@ -65,50 +87,81 @@ export component NoteCard inherits Rectangle {
         background: Theme.accent-soft;
     }
 
-    if root.selected: Rectangle {
-        x: 0px;
-        y: 0px;
-        width: 3px;
-        height: parent.height;
-        background: Theme.accent;
-    }
-
     VerticalLayout {
         padding: 16px;
-        spacing: 4px;
+        spacing: 6px;
 
         Text {
             text: root.card.title;
+            // callout role: 13 medium, card title
             font-size: 13px;
             font-weight: 600;
             color: Theme.ink;
             overflow: elide;
         }
 
+        // preview: three lines normally, trimmed to two when a tag row needs the
+        // space
         if root.zoom >= 0.55: Text {
             text: root.card.preview;
             font-size: 12px;
             color: Theme.ink-secondary;
             wrap: TextWrap.word-wrap;
             overflow: elide;
-            max-height: 44px;
+            height: root.tags.length > 0 ? 30px : 52px;
         }
 
-        if root.zoom >= 0.55 && root.card.tags != "": Text {
-            text: root.card.tags;
-            font-size: 10px;
-            color: Theme.ink-tertiary;
-            overflow: elide;
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        Rectangle {
+            height: root.tags.length > 0 ? 14px : 0px;
         }
     }
 
+    for tag[ti] in root.tags: HorizontalLayout {
+        x: 16px + ti * 50px;
+        y: parent.height - 22px;
+        width: 46px;
+        height: 12px;
+        spacing: 4px;
+        visible: root.zoom >= 0.55;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: Theme.phase-hue(tag.hue);
+        }
+
+        Text {
+            text: tag.label;
+            font-size: 10px;
+            color: Theme.ink-tertiary;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+
+    // fixed-star pin marker: a four-point star drawn from two crossed diamonds
     if root.card.pinned: Rectangle {
-        x: parent.width - 16px;
+        x: parent.width - 20px;
         y: 8px;
-        width: 8px;
-        height: 8px;
-        border-radius: 4px;
-        background: Theme.accent;
+        width: 12px;
+        height: 12px;
+
+        Path {
+            width: 100%;
+            height: 100%;
+            viewbox-x: 0;
+            viewbox-y: 0;
+            viewbox-width: 12;
+            viewbox-height: 12;
+            fill: Theme.accent;
+            // a star
+            commands: "M 6 0 C 6.6 4 8 5.4 12 6 C 8 6.6 6.6 8 6 12 C 5.4 8 4 6.6 0 6 C 4 5.4 5.4 4 6 0 Z";
+        }
     }
 
     ta := TouchArea {
