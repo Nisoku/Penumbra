@@ -2107,7 +2107,7 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_generic_000000000000000c: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("IteratorResult<any>")], shim_idx: 735, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [NamedExternref("IteratorResult<any>")], shim_idx: 834, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen_3638e33c5ea8adcb___convert__closures_____invoke___js_sys_ea6dbb3266c7db31___IteratorNext__core_37ee0ce0c4cd57d5___result__Result_____wasm_bindgen_3638e33c5ea8adcb___JsError___true_);
             return ret;
         },
