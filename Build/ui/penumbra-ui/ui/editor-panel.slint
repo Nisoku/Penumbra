@@ -30,14 +30,22 @@ export component EditorPanel inherits Rectangle {
     callback undo();
     callback redo();
     callback focus-changed(bool);
+    callback surface-resized(length, length);
 
     // did you know it's actually called chrome? lol Google Chrome is chrome
     property <length> chrome-height: 52px;
     property <length> footer-height: 48px;
-    property <length> surface-width: 940px;
-    property <length> surface-height: 560px;
+    property <length> h-margin: 48px;
+    property <length> v-margin: 24px;
+    // Cap the column width so prose stays readable on very wide windows 
+    // (you'll never guess how i discovered this)
+    property <length> max-surface-width: 1100px;
+    property <length> avail-width: root.width - 2 * root.h-margin;
+    property <length> avail-height: root.height - root.chrome-height - root.footer-height - 2 * root.v-margin;
+    property <length> surface-width: Math.max(1px, Math.min(root.avail-width, root.max-surface-width));
+    property <length> surface-height: Math.max(1px, root.avail-height);
     property <length> editor-x: (root.width - root.surface-width) / 2;
-    property <length> editor-y: root.chrome-height + Math.max(16px, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
+    property <length> editor-y: root.chrome-height + Math.max(root.v-margin, (root.height - root.chrome-height - root.footer-height - root.surface-height) / 2);
     property <bool> pointer-down-active: false;
     property <bool> blink-phase: false;
     // Consecutive click bookkeeping for synthesizing triple-click, such silly
@@ -50,8 +58,14 @@ export component EditorPanel inherits Rectangle {
     changed open => {
         if (root.open) {
             editor-focus.focus();
+            // the panel may have resized while closed, so resync on open
+            root.surface-resized(root.surface-width, root.surface-height);
         }
     }
+
+    // Keep Rust's render resolution in sync with Slint.
+    changed surface-width => { root.surface-resized(root.surface-width, root.surface-height); }
+    changed surface-height => { root.surface-resized(root.surface-width, root.surface-height); }
 
     blink-timer := Timer {
         interval: 530ms;

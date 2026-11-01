@@ -8,9 +8,12 @@ use engine::EditorState;
 use slint::Image;
 use std::{cell::RefCell, rc::Rc};
 
-// TODO: make dynamic and responsive
-const WIDTH: u32 = 940;
-const HEIGHT: u32 = 560;
+// Fallback size used before Slint reports the actual size
+const DEFAULT_WIDTH: u32 = 940;
+const DEFAULT_HEIGHT: u32 = 560;
+// Floor so a tiny/zero panel never produces a weird buffer lol
+const MIN_WIDTH: u32 = 120;
+const MIN_HEIGHT: u32 = 80;
 const CONTENT_PADDING_X: i32 = 30;
 const CONTENT_PADDING_TOP: i32 = 22;
 const CONTENT_PADDING_BOTTOM: i32 = 22;
@@ -29,6 +32,11 @@ impl RichEditor {
     pub fn new(markdown: &str) -> Self {
         let state = Rc::new(RefCell::new(EditorState::new(markdown)));
         Self { state }
+    }
+
+    /// Slint reports this whenever the window/panel changes size.
+    pub fn set_size(&mut self, width: u32, height: u32) {
+        self.state.borrow_mut().set_size(width, height);
     }
 
     /// Render the current editor contents to an RGBA image for Slint to display.

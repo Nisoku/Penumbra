@@ -365,6 +365,11 @@ pub(crate) fn wire_editor(ui: &AppWindow, state: &Rc<SharedState>) {
 
     on_view!(on_editor_focus_changed, |session, focused| session
         .set_focused(focused));
+    on_view!(on_editor_surface_resized, |session, width, height| session
+        .set_size(
+            width.max(0.0).round() as u32,
+            height.max(0.0).round() as u32
+        ));
     on_view!(on_editor_pointer_down, |session, x, y, extend| session
         .pointer_down(x, y, extend));
     on_view!(on_editor_pointer_drag, |session, x, y| session

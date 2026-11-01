@@ -32,6 +32,7 @@ export component AppWindow inherits Window {
     callback close-editor();
     callback editor-input-key(string, bool, bool, bool, bool);
     callback editor-focus-changed(bool);
+    callback editor-surface-resized(length, length);
     callback editor-pointer-down(length, length, bool);
     callback editor-pointer-drag(length, length);
     callback editor-pointer-double-click(length, length);
@@ -109,6 +110,7 @@ export component AppWindow inherits Window {
         close => { root.close-editor(); }
         input-key(text, shift, control, meta, alt) => { root.editor-input-key(text, shift, control, meta, alt); }
         focus-changed(focused) => { root.editor-focus-changed(focused); }
+        surface-resized(w, h) => { root.editor-surface-resized(w, h); }
         pointer-down(x, y, extend) => { root.editor-pointer-down(x, y, extend); }
         pointer-drag(x, y) => { root.editor-pointer-drag(x, y); }
         pointer-double-click(x, y) => { root.editor-pointer-double-click(x, y); }

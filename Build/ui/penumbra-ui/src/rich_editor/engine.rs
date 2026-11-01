@@ -5,7 +5,10 @@ use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 use super::format::{blend_rect, Format};
 use super::scan::{body_metrics, classify_lines, scan_line, LineKind};
-use super::{CONTENT_PADDING_BOTTOM, CONTENT_PADDING_TOP, CONTENT_PADDING_X, HEIGHT, WIDTH};
+use super::{
+    CONTENT_PADDING_BOTTOM, CONTENT_PADDING_TOP, CONTENT_PADDING_X, DEFAULT_HEIGHT, DEFAULT_WIDTH,
+    MIN_HEIGHT, MIN_WIDTH,
+};
 
 pub(super) struct EditorState {
     font_system: FontSystem,
@@ -16,6 +19,8 @@ pub(super) struct EditorState {
     open_undo_group: Option<UndoGroup>,
     notice: Option<String>,
     focused: bool,
+    width: u32,
+    height: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -32,10 +37,8 @@ impl EditorState {
         let mut font_system = FontSystem::new();
         let cache = SwashCache::new();
         let mut buffer = Buffer::new(&mut font_system, body_metrics());
-        buffer.set_size(
-            Some((WIDTH as i32 - CONTENT_PADDING_X * 2) as f32),
-            Some((HEIGHT as i32 - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM) as f32),
-        );
+        let (cw, ch) = content_size(DEFAULT_WIDTH, DEFAULT_HEIGHT);
+        buffer.set_size(Some(cw), Some(ch));
         buffer.set_text(
             markdown,
             &cosmic_text::Attrs::new(),
@@ -51,9 +54,28 @@ impl EditorState {
             open_undo_group: None,
             notice: None,
             focused: false,
+            width: DEFAULT_WIDTH,
+            height: DEFAULT_HEIGHT,
         };
         state.restyle();
         state
+    }
+
+    // Resize the surface to the actual size; clamped
+    pub(super) fn set_size(&mut self, width: u32, height: u32) {
+        let width = width.max(MIN_WIDTH);
+        let height = height.max(MIN_HEIGHT);
+        if width == self.width && height == self.height {
+            return;
+        }
+        self.width = width;
+        self.height = height;
+        let (cw, ch) = content_size(width, height);
+        let font_system = &mut self.font_system;
+        self.editor.with_buffer_mut(|buffer| {
+            buffer.set_size(Some(cw), Some(ch));
+            buffer.shape_until_scroll(font_system, false);
+        });
     }
 
     // Re-derive per-line styling from the current text; never touches the bytes.
@@ -447,7 +469,7 @@ impl EditorState {
     }
 
     pub(super) fn render(&mut self) -> SharedPixelBuffer<Rgba8Pixel> {
-        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(WIDTH, HEIGHT);
+        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(self.width, self.height);
         pixels.make_mut_slice().fill(Rgba8Pixel {
             r: 0xf7,
             g: 0xf5,
@@ -498,7 +520,14 @@ impl EditorState {
     }
 }
 
-/// Whether an editor action changes the buffer text (and thus needs a restyle ;P).
+// Inner text area for a given surface size
+fn content_size(width: u32, height: u32) -> (f32, f32) {
+    let cw = (width as i32 - CONTENT_PADDING_X * 2).max(1) as f32;
+    let ch = (height as i32 - CONTENT_PADDING_TOP - CONTENT_PADDING_BOTTOM).max(1) as f32;
+    (cw, ch)
+}
+
+// Whether an editor action changes the buffer text (and thus needs a restyle ;P).
 fn mutates(action: Action) -> bool {
     matches!(
         action,

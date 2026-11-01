@@ -203,6 +203,45 @@ fn triple_click_selects_line() {
     );
 }
 
+#[test]
+fn full_round_trips_byte_for_byte() {
+    let corpus = "# Heading one\n\
+         \n\
+         Some *italic* and **bold** and `code` and ~~strike~~ prose.\n\
+         \n\
+         > a quote line\n\
+         \n\
+         - bullet one\n\
+         - bullet two\n\
+         \n\
+         1. first\n\
+         2. second\n\
+         \n\
+         ```rust\n\
+         let x = 1; // fenced, markers intact\n\
+         ```\n\
+         \n\
+         | a | b |\n\
+         | - | - |\n\
+         | 1 | 2 |\n\
+         \n\
+         trailing paragraph with no final newline";
+    let editor = RichEditor::new(corpus);
+    assert_eq!(
+        editor.to_markdown(),
+        corpus,
+        "it did not survive byte-for-byte"
+    );
+}
+
+/// Blank-line runs and a trailing newline are not collapsed or trimmed.
+#[test]
+fn blank_runs_and_trailing_newline_survive() {
+    let src = "one\n\n\n\ntwo\n";
+    let editor = RichEditor::new(src);
+    assert_eq!(editor.to_markdown(), src);
+}
+
 /// Shift+click extends the existing caret into a selection rather than
 /// collapsing to the clicked point.
 #[test]
