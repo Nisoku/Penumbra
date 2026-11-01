@@ -34,7 +34,7 @@ impl EditorState {
     // Build the engine from raw markdown. The buffer IS the source text; styling
     // is just a projection on top, so we can't corrupt the user's markdown! XD
     pub(super) fn new(markdown: &str) -> Self {
-        let mut font_system = FontSystem::new();
+        let mut font_system = super::fonts::build_font_system();
         let cache = SwashCache::new();
         let mut buffer = Buffer::new(&mut font_system, body_metrics());
         let (cw, ch) = content_size(DEFAULT_WIDTH, DEFAULT_HEIGHT);

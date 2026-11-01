@@ -102,7 +102,7 @@ async fn put_wasm(name: &str, data: &[u8]) {
     };
 
     let req_init = web_sys::RequestInit::new();
-    req_init.set_method("PUT");
+    req_init.set_method("GET");
     let request = match web_sys::Request::new_with_str_and_init(name, &req_init) {
         Ok(r) => r,
         Err(_) => return,

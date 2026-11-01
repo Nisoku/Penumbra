@@ -1,6 +1,7 @@
 //! A COSMIC Text-based rich text editor rendered into a Slint surface.
 
 mod engine;
+mod fonts;
 mod format;
 mod scan;
 
