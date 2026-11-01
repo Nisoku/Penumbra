@@ -29,14 +29,23 @@
 
         const canvas = document.getElementById("canvas");
 
-        // referenced a blog post for this lolllll
         function fill() {
             const s = canvas.style;
+            if (s.width === "100%" && s.height === "100%"
+                && s.maxWidth === "100%" && s.maxHeight === "100%") {
+                return;
+            }
             s.minWidth = s.width = s.maxWidth = "100%";
             s.minHeight = s.height = s.maxHeight = "100%";
         }
-        fill();
+
         new ResizeObserver(fill).observe(document.body);
+        // funnily enough you usually only see this in extensions or userscripts, not web pages
+        // it's super handy. so idk why
+        new MutationObserver(fill).observe(canvas, {
+            attributes: true,
+            attributeFilter: ["style"],
+        });
 
         init();
     </script>
