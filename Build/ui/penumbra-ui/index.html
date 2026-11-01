@@ -13,18 +13,31 @@
             overflow: hidden;
             background: #101423;
         }
-        canvas {
+        #canvas {
             display: block;
-            width: 100vw;
-            height: 100vh;
             outline: none;
+            touch-action: none;
         }
     </style>
 </head>
 <body>
-    <canvas id="canvas"></canvas>
+    <!-- data-slint-auto-resize-to-preferred stops Slint's winit backend from
+         pinning the canvas to the window's preferred size at startup. -->
+    <canvas id="canvas" data-slint-auto-resize-to-preferred="false"></canvas>
     <script type="module">
         import init from "./pkg/penumbra_ui.js";
+
+        const canvas = document.getElementById("canvas");
+
+        // referenced a blog post for this lolllll
+        function fill() {
+            const s = canvas.style;
+            s.minWidth = s.width = s.maxWidth = "100%";
+            s.minHeight = s.height = s.maxHeight = "100%";
+        }
+        fill();
+        new ResizeObserver(fill).observe(document.body);
+
         init();
     </script>
 </body>

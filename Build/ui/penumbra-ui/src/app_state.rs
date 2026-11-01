@@ -28,8 +28,8 @@ thread_local! {
 }
 
 pub(crate) const WELCOME_TITLE: &str = "Welcome to Penumbra";
-pub(crate) const WELCOME_BODY: &str =
-    "This is your first note.\n\nEverything you write lands on the map over time. Drag notes around, link them, and watch constellations form.";
+// why not make this a file atp? well i'm lazy
+pub(crate) const WELCOME_BODY: &str = "This is your first note. Everything you write in plain Markdown lands on the map, and related notes drift together over time.\n\n# On the map\n\nDouble-click a card to open it. Left-drag moves a note around; let go and it eases back toward where it belongs. Right-drag pins a note so it stops moving and others orbit it, and a right-tap unpins it again. The search box up top jumps the camera to whatever you're looking for: type and press Enter.\n\n# In the editor\n\nIt's Markdown, so `#` makes a heading and the usual syntax works. Cmd+B bolds, Cmd+I italicizes. Cmd+C/X/V copy, cut, and paste; Cmd+Z and Cmd+Shift+Z undo and redo. Press Esc to close the note and glide back out to the map.";
 
 pub(crate) const TOP_BAR_HEIGHT: f32 = 52.0;
 
